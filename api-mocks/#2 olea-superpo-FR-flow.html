@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dowsure and Olea | Super PO Data Flow</title>
+  <style>
+    :root {
+      --paper: #f7f9f8;
+      --surface: #fff;
+      --ink: #193038;
+      --muted: #566c73;
+      --line: #aabdc0;
+      --border: #d8e2e0;
+      --teal: #087f75;
+      --teal-pale: #e8f5f2;
+      --blue: #315d8d;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font-family: Arial, system-ui, sans-serif; }
+    main { max-width: 1420px; margin: 0 auto; padding: 40px 32px 72px; }
+    .eyebrow { color: var(--teal); font: 700 12px/1.4 Consolas, monospace; }
+    h1 { margin: 10px 0 12px; font-size: 30px; line-height: 1.3; font-weight: 650; overflow-wrap: anywhere; }
+    .lead { margin: 0; max-width: 920px; color: var(--muted); font-size: 15px; line-height: 1.7; }
+    .relation { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 24px; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: 14px; }
+    .relation strong { color: var(--teal); }
+    .relation span { color: var(--muted); }
+    section { padding-top: 44px; }
+    .heading { display: flex; align-items: baseline; gap: 16px; margin-bottom: 18px; }
+    .number { color: var(--teal); font: 700 12px Consolas, monospace; }
+    h2 { margin: 0; font-size: 20px; line-height: 1.35; font-weight: 650; overflow-wrap: anywhere; }
+    .scroll { width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+    svg { display: block; width: 100%; min-width: 1200px; }
+    svg .life { stroke: var(--line); stroke-width: 1; stroke-dasharray: 5 5; }
+    svg .actor { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; rx: 4; }
+    svg .actor.focal { fill: var(--teal-pale); stroke: var(--teal); }
+    svg .actor.external { fill: #f1f5f9; stroke: #8da5b8; }
+    svg .name { fill: var(--ink); font-size: 15px; font-weight: 600; text-anchor: middle; }
+    svg .sub { fill: var(--muted); font-size: 11px; text-anchor: middle; }
+    svg .activation { fill: #e7efed; stroke: var(--muted); stroke-width: .8; }
+    svg .call { fill: none; stroke: var(--muted); stroke-width: 1.5; marker-end: url(#arrow); }
+    svg .api { fill: none; stroke: var(--blue); stroke-width: 1.6; marker-end: url(#arrow-blue); }
+    svg .return { fill: none; stroke: var(--muted); stroke-width: 1.3; stroke-dasharray: 6 4; marker-end: url(#arrow); }
+    svg .success { fill: none; stroke: var(--teal); stroke-width: 2; marker-end: url(#arrow-teal); }
+    svg .label { fill: var(--ink); font-size: 13px; font-weight: 500; text-anchor: middle; }
+    svg .technical { fill: var(--blue); font: 12px Consolas, monospace; text-anchor: middle; }
+    svg .mask { fill: var(--surface); }
+    svg .separator { stroke: var(--border); stroke-width: 1; }
+    svg .caption { fill: var(--muted); font-size: 12px; text-anchor: middle; }
+    .notes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 30px; margin-top: 18px; }
+    .notes p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
+    .notes strong { color: var(--ink); }
+    .formula { margin-top: 20px; padding: 16px 18px; border-left: 3px solid var(--teal); background: var(--teal-pale); }
+    .formula h3 { margin: 0 0 10px; color: var(--ink); font-size: 14px; font-weight: 700; }
+    .formula p { margin: 6px 0; color: var(--ink); font: 13px/1.65 Consolas, monospace; overflow-wrap: anywhere; }
+    .formula .explain { color: var(--muted); font-family: Arial, system-ui, sans-serif; }
+    footer { margin-top: 48px; border-top: 1px solid var(--border); padding-top: 18px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+    @media (max-width: 700px) {
+      main { padding: 24px 16px 48px; }
+      h1 { font-size: 25px; }
+      .notes { grid-template-columns: 1fr; }
+    }
+    @media print {
+      body { background: #fff; }
+      main { max-width: none; padding: 0; }
+      section { break-inside: avoid; padding-top: 24px; }
+      .scroll { overflow: visible; border: 0; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">DOWSURE / OLEA DATA EXCHANGE</div>
+    <h1>Super PO Data Flow</h1>
+    <p class="lead">After obtaining financing approval from Dowsure, a merchant draws on its available credit. Dowsure prepares order-level financing records from seller-authorized Amazon Selling Partner API (SP-API) Finances Transactions data. Once Olea confirms the related orders, Dowsure aggregates them into a Super PO financing request.</p>
+    <div class="relation"><strong>Relationship</strong><span>One financing drawdown → one Super PO identifier → multiple order-level records</span></div>
+  </header>
+
+  <section>
+    <div class="heading"><span class="number">01 / 03</span><h2>Origin of the Financing Request</h2></div>
+    <div class="scroll" tabindex="0" aria-label="Financing application and drawdown sequence diagram; scroll horizontally if needed">
+      <svg viewBox="0 0 1200 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="external-origination-title external-origination-desc">
+        <title id="external-origination-title">Origin of the financing request</title>
+        <desc id="external-origination-desc">A merchant applies for financing with Dowsure and obtains approved credit, then requests a drawdown. Dowsure checks available credit, allocates the amount across stores, and creates a drawdown record.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#566c73"/></marker>
+          <marker id="arrow-blue" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#315d8d"/></marker>
+        </defs>
+        <line class="life" x1="360" y1="112" x2="360" y2="420"/><line class="life" x1="840" y1="112" x2="840" y2="420"/>
+        <rect class="actor external" x="264" y="48" width="192" height="64"/><text class="name" x="360" y="76">Merchant</text><text class="sub" x="360" y="98">Financing and drawdowns</text>
+        <rect class="actor focal" x="744" y="48" width="192" height="64"/><text class="name" x="840" y="76">Dowsure</text><text class="sub" x="840" y="98">Credit and drawdown processing</text>
+        <rect class="activation" x="836" y="144" width="8" height="272"/>
+        <line class="api" x1="360" y1="164" x2="832" y2="164"/><rect class="mask" x="496" y="138" width="208" height="18"/><text class="label" x="600" y="152">Apply for financing</text>
+        <line class="return" x1="840" y1="220" x2="368" y2="220"/><rect class="mask" x="500" y="194" width="200" height="18"/><text class="label" x="600" y="208">Approved credit available</text>
+        <line class="api" x1="360" y1="276" x2="832" y2="276"/><rect class="mask" x="508" y="250" width="184" height="18"/><text class="label" x="600" y="264">Request a drawdown</text>
+        <path class="call" d="M840 332 H968 V356 H848"/><rect class="mask" x="976" y="316" width="190" height="18"/><text class="label" x="1071" y="330">Check and allocate credit</text>
+        <path class="call" d="M840 388 H968 V412 H848"/><rect class="mask" x="976" y="372" width="190" height="18"/><text class="label" x="1071" y="386">Create drawdown record</text>
+      </svg>
+    </div>
+    <div class="notes"><p><strong>Request origin:</strong> The merchant applies for financing and obtains approved credit from Dowsure. Each subsequent drawdown creates the record used in this flow.</p><p><strong>Trigger:</strong> The merchant initiates the drawdown on the Pay In page.</p><p><strong>Olea eligibility:</strong> After the drawdown, the record must meet lender routing and Olea credit approval conditions before Dowsure retrieves related orders for submission.</p></div>
+  </section>
+
+  <section>
+    <div class="heading"><span class="number">02 / 03</span><h2>Order Source and Coverage Check</h2></div>
+    <div class="scroll" tabindex="0" aria-label="Order source and FR Invoice sequence diagram; scroll horizontally if needed">
+      <svg viewBox="0 0 1200 572" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="external-order-title external-order-desc">
+        <title id="external-order-title">Order source and FR Invoice confirmation</title>
+        <desc id="external-order-desc">Dowsure obtains transaction data from the seller-authorized Amazon SP-API Finances Transactions source, selects and accumulates eligible orders until their calculated principal covers the remaining financing amount, submits an FR Invoice batch to Olea, and waits for final order confirmation.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#566c73"/></marker>
+          <marker id="arrow-blue" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#315d8d"/></marker>
+          <marker id="arrow-teal" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#087f75"/></marker>
+        </defs>
+        <line class="life" x1="160" y1="112" x2="160" y2="500"/><line class="life" x1="600" y1="112" x2="600" y2="500"/><line class="life" x1="1040" y1="112" x2="1040" y2="500"/>
+        <rect class="actor external" x="64" y="48" width="192" height="64"/><text class="name" x="160" y="76">Amazon SP-API</text><text class="sub" x="160" y="98">Finances Transactions</text>
+        <rect class="actor focal" x="504" y="48" width="192" height="64"/><text class="name" x="600" y="76">Dowsure</text><text class="sub" x="600" y="98">Order preparation</text>
+        <rect class="actor" x="944" y="48" width="192" height="64"/><text class="name" x="1040" y="76">Olea</text><text class="sub" x="1040" y="98">FR Invoice confirmation</text>
+        <rect class="activation" x="596" y="132" width="8" height="368"/>
+        <path class="call" d="M600 132 H760 V148 H608"/><rect class="mask" x="706" y="112" width="242" height="18"/><text class="label" x="827" y="126">Check eligible drawdowns</text>
+        <line class="call" x1="600" y1="164" x2="168" y2="164"/><rect class="mask" x="204" y="138" width="352" height="18"/><text class="technical" x="380" y="152">GET /finances/2024-06-19/transactions</text>
+        <line class="return" x1="160" y1="216" x2="592" y2="216"/><rect class="mask" x="268" y="190" width="224" height="18"/><text class="label" x="380" y="204">Order IDs, amounts, currencies</text>
+        <path class="call" d="M600 264 H712 V292 H608"/><rect class="mask" x="748" y="247" width="246" height="18"/><text class="label" x="871" y="261">Select eligible orders</text>
+        <path class="call" d="M600 300 H760 V328 H608"/><rect class="mask" x="748" y="282" width="246" height="18"/><text class="label" x="871" y="296">Accumulate principal to target</text>
+        <line class="api" x1="604" y1="336" x2="1032" y2="336"/><rect class="mask" x="704" y="310" width="232" height="18"/><text class="label" x="820" y="324">Submit FR Invoice batch</text>
+        <line class="return" x1="1040" y1="388" x2="608" y2="388"/><rect class="mask" x="744" y="362" width="152" height="18"/><text class="technical" x="820" y="376">ACCEPTED + batch ID</text>
+        <line class="call" x1="604" y1="440" x2="1032" y2="440"/><rect class="mask" x="698" y="414" width="244" height="18"/><text class="label" x="820" y="428">Check order-level batch result</text>
+        <line class="success" x1="1040" y1="492" x2="608" y2="492"/><rect class="mask" x="720" y="466" width="200" height="18"/><text class="label" x="820" y="480">Orders finally confirmed</text>
+        <line class="separator" x1="48" y1="524" x2="1152" y2="524"/><text class="caption" x="600" y="548">Only when eligible principal covers the remaining financing amount does the flow continue to FR Invoice submission.</text>
+      </svg>
+    </div>
+    <div class="notes"><p><strong>Scheduled processing:</strong> Dowsure periodically checks eligible drawdowns and starts Olea order preparation after lender routing.</p><p><strong>Transaction source:</strong> Seller-authorized Amazon SP-API Finances Transactions. Order identifiers come from transaction references; amounts, currencies, shipping fees, and posting dates come from transaction data.</p><p><strong>Relationship:</strong> One drawdown may be linked to multiple orders. Each order is confirmed through the FR Invoice process.</p></div>
+    <div class="formula" aria-label="Order coverage calculation"><h3>Order Coverage Calculation</h3><p>EligiblePrincipal(i) = round((OrderAmount(i) - Shipping(i)) x (1 - ReturnRate) x DisbursementRate x DilutionRate, 2)</p><p>Standard: DisbursementRate = 1.00.</p><p>Deferred: DisbursementRate = min(1.00, (Q1 Disbursements + Q2 Disbursements) / (Q1 Sales + Q2 Sales)); if total sales are 0, the rate remains 0.</p><p>Target = remaining financing amount; select orders until sum(EligiblePrincipal(i)) >= Target.</p><p>FundedAmount(i) = min(EligiblePrincipal(i), remaining Target)</p><p>Example: Target = 100; eligible principal = 40 + 35 + 30 = 105; funded amounts = 40 + 35 + 25 = 100.</p><p class="explain">If the selected orders do not cover the target, Dowsure does not submit an Olea order batch in that cycle.</p></div>
+  </section>
+
+  <section>
+    <div class="heading"><span class="number">03 / 03</span><h2>Super PO Submission and Confirmation</h2></div>
+    <div class="scroll" tabindex="0" aria-label="Super PO submission and confirmation sequence diagram; scroll horizontally if needed">
+      <svg viewBox="0 0 1200 524" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="external-superpo-title external-superpo-desc">
+        <title id="external-superpo-title">Super PO submission and confirmation</title>
+        <desc id="external-superpo-desc">Once all order-level records are confirmed, Dowsure aggregates the Super PO for the drawdown, submits the batch to Olea, and checks the final processing result.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#566c73"/></marker>
+          <marker id="arrow-blue" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#315d8d"/></marker>
+          <marker id="arrow-teal" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#087f75"/></marker>
+        </defs>
+        <line class="life" x1="360" y1="112" x2="360" y2="452"/><line class="life" x1="840" y1="112" x2="840" y2="452"/>
+        <rect class="actor focal" x="264" y="48" width="192" height="64"/><text class="name" x="360" y="76">Dowsure</text><text class="sub" x="360" y="98">Super PO submission</text>
+        <rect class="actor external" x="744" y="48" width="192" height="64"/><text class="name" x="840" y="76">Olea</text><text class="sub" x="840" y="98">Super PO confirmation</text>
+        <rect class="activation" x="356" y="144" width="8" height="288"/>
+        <path class="call" d="M360 160 H480 V188 H368"/><rect class="mask" x="494" y="143" width="292" height="18"/><text class="label" x="640" y="157">Verify orders and total funding</text>
+        <line class="api" x1="364" y1="232" x2="832" y2="232"/><rect class="mask" x="458" y="206" width="284" height="18"/><text class="label" x="600" y="220">Submit Super PO and linked order IDs</text>
+        <line class="return" x1="840" y1="284" x2="368" y2="284"/><rect class="mask" x="524" y="258" width="152" height="18"/><text class="technical" x="600" y="272">ACCEPTED + batch ID</text>
+        <line class="call" x1="364" y1="336" x2="832" y2="336"/><rect class="mask" x="484" y="310" width="232" height="18"/><text class="label" x="600" y="324">Check Super PO batch result</text>
+        <line class="success" x1="840" y1="388" x2="368" y2="388"/><rect class="mask" x="490" y="362" width="220" height="18"/><text class="label" x="600" y="376">Super PO finally confirmed</text>
+        <line class="separator" x1="48" y1="440" x2="1152" y2="440"/><text class="caption" x="600" y="468">One Super PO identifier corresponds to one drawdown; linked order IDs support order-level traceability.</text>
+      </svg>
+    </div>
+    <div class="notes"><p><strong>Super PO data:</strong> Super PO identifier, total order amount, total financing amount, currency, buyer, seller, and linked order identifiers.</p><p><strong>Completion:</strong> <em>ACCEPTED</em> from Olea means the batch was received. The Super PO is confirmed only after final processing succeeds.</p></div>
+  </section>
+
+  <footer>Illustrative business flow. No actual order or merchant data is shown. Field definitions and API behavior are subject to the integration specification agreed by both parties.</footer>
+</main>
+</body>
+</html>

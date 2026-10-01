@@ -1,0 +1,2 @@
+# Binary documents should not be committed; keep the Markdown source instead.
+*.pdf
