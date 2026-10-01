@@ -1,3 +1,5 @@
+ARCHIVED - historical, superseded by the active docs; do not use as current truth.
+
 # Dowsure Data Acquisition and Provenance Design
 
 ## 1. Purpose
