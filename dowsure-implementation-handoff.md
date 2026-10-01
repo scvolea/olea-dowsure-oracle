@@ -1,5 +1,32 @@
 # Olea-Dowsure Verifiable Data Oracle
 
+> **Plain-English summary.** This is the Dowsure-facing handoff. It defines the
+> boundary between the two companies and the exact message shapes they exchange.
+> In short: Olea hands out a one-time "challenge" (a scoped permission slip with a
+> single-use number). Dowsure runs the fetch inside a sealed, tamper-proof virtual
+> machine (an **AWS Nitro Enclave**), which hashes and transforms the data and signs
+> a receipt. Dowsure wraps that receipt in a signed envelope and submits it to Olea,
+> which verifies everything and accepts or rejects it. The sealed-box part is proven;
+> the real source-authenticity proof (**TLSNotary**) is still a placeholder. For the
+> authoritative status facts, see
+> [docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md).
+>
+> Acronyms on first use: SP-API (Selling Partner API, Amazon's seller data API),
+> Nitro Enclave (isolated tamper-proof virtual machine, no storage, no normal network),
+> vsock (virtual socket, the only channel between the enclave and its host), KYC (Know
+> Your Customer), S3 (Amazon Simple Storage Service), LWA (Login with Amazon),
+> TLSNotary (a protocol that proves a specific HTTPS response came from a specific
+> server), EIF (Enclave Image File, the artifact that boots inside the enclave), PCR
+> (Platform Configuration Register, a hash that fingerprints the EIF), SBOM (Software
+> Bill of Materials).
+>
+> **Consistency note.** This document must agree with the single internal handoff
+> ([IMPLEMENTATION_AGENT_HANDOFF.md](IMPLEMENTATION_AGENT_HANDOFF.md)) and the status
+> matrix: the running enclave uses CID 16 and vsock port 5005; TLSNotary is a
+> hash-contract placeholder (not a real signed proof yet); and the next source target
+> is finances - Transactions (`GET /finances/2024-06-19/transactions`) plus Financial
+> Event Groups (`GET /finances/v0/financialEventGroups`) - not order metrics alone.
+
 ## 1. Architecture and Boundaries
 
 ```mermaid

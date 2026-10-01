@@ -33,7 +33,7 @@ The architecture is valid for a proof-of-trust prototype:
 
 ## Read these summaries first
 
-- [docs/ARCHITECTURE_SUMMARY.md](docs/ARCHITECTURE_SUMMARY.md)
+- [IMPLEMENTATION_AGENT_HANDOFF.md](../IMPLEMENTATION_AGENT_HANDOFF.md) - the single internal handoff (architecture, acceptance, and Definition of Done; the former ARCHITECTURE_SUMMARY.md now points here).
 - [docs/DEPLOYMENT_SUMMARY.md](docs/DEPLOYMENT_SUMMARY.md)
 - [docs/POC_LIMITATIONS.md](docs/POC_LIMITATIONS.md)
 

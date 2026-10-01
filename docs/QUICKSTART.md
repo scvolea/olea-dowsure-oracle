@@ -1,58 +1,28 @@
 # Quick start
 
+> **Plain-English summary.** This page is just a signpost. It tells you which document
+> to open for what. It does not repeat status facts - those live in one place, the
+> status matrix.
+
 ## What this repo is
 
-This repository is a PoC for a verifiable data oracle design using Nitro attestation and a Dowsure/Olea trust flow. It is designed to prove the architecture, not to claim production-grade upstream authenticity yet.
+A Proof of Concept (PoC) for a verifiable data oracle: data is processed inside a
+sealed, tamper-proof AWS Nitro Enclave that signs a receipt Olea can verify. It proves
+the architecture; it does not yet claim production-grade upstream authenticity.
 
-## The honest current status
+## Start here (in order)
 
-This project is ready to show:
+1. [README.md](../README.md) - the front door and full index of folders and docs.
+2. [docs/PROJECT_STATUS_MATRIX.md](PROJECT_STATUS_MATRIX.md) - the single source of truth for status facts (what is verified, what is open). Read this instead of any restated status elsewhere.
+3. [docs/FLOWS.md](FLOWS.md) - the five end-to-end flows traced against the code.
+4. [docs/SOURCE_ENDPOINTS.md](SOURCE_ENDPOINTS.md) - which Amazon endpoint maps to which data category, plus the eligibility formula.
+5. [opinions.md](../opinions.md) - what was done, what was deliberately not done, and why.
 
-- a real Nitro enclave runtime,
-- real attestation generation,
-- real attestation verification,
-- PCR checks,
-- key and `user_data` binding,
-- EIF measurement registration.
+## Going deeper
 
-This project is not ready to claim:
+- [IMPLEMENTATION_AGENT_HANDOFF.md](../IMPLEMENTATION_AGENT_HANDOFF.md) - the single internal handoff for the next implementer.
+- [docs/ARCHITECTURE_DIAGRAM.md](ARCHITECTURE_DIAGRAM.md) - the architecture diagram with a plain-language walkthrough.
+- [sam/docs/POC_LIMITATIONS.md](../sam/docs/POC_LIMITATIONS.md) - the honest limitations list.
 
-- a real TLSNotary proof from a live approved notary,
-- Amazon-origin verified data,
-- full end-to-end production acceptance.
-
-## How to read this project
-
-Start here:
-
-1. [README.md](../README.md)
-2. [docs/PROJECT_STATUS_MATRIX.md](PROJECT_STATUS_MATRIX.md)
-3. [docs/ARCHITECTURE_DIAGRAM.md](ARCHITECTURE_DIAGRAM.md)
-4. [IMPLEMENTATION_AGENT_HANDOFF.md](../IMPLEMENTATION_AGENT_HANDOFF.md)
-5. [sam/docs/POC_LIMITATIONS.md](../sam/docs/POC_LIMITATIONS.md)
-
-## Main folders
-
-- [sam](../sam)
-  - SAM templates and the verification function
-- [nitro-enclave](../nitro-enclave)
-  - Java enclave runtime and attestation implementation
-- [coordinator](../coordinator)
-  - coordinator flow and vsock handoff logic
-- [scripts](../scripts)
-  - evidence and proof helper scripts
-- [archive](../archive)
-  - historical design notes only
-
-## Recommended next milestone
-
-The next hard gate is external to this repo:
-
-- obtain approved TLSNotary prover infrastructure,
-- get an approved notary public key,
-- validate proof compatibility with the real upstream endpoint,
-- verify real signed proofs before calling the source flow complete.
-
-## Short version to share externally
-
-This is a real Nitro attestation proof-of-concept with a blocked source-proof gate. The enclave and trust chain work. The notary-backed upstream proof is the remaining missing dependency.
+For the current status, do not rely on this page - see
+[docs/PROJECT_STATUS_MATRIX.md](PROJECT_STATUS_MATRIX.md).

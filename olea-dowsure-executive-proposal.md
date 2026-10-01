@@ -1,5 +1,24 @@
 # Olea-Dowsure Verifiable Data Oracle
 
+> **Plain-English summary.** Today Olea trusts Dowsure's word that the Amazon data it
+> submits is real and complete. This proposal removes that blind trust. Data is fetched
+> and processed inside a sealed, tamper-proof virtual machine (an AWS Nitro Enclave),
+> which signs a receipt proving which approved code ran; Olea independently verifies
+> that receipt plus a proof that the data genuinely came from the provider. The result
+> is a machine-checkable evidence package instead of "trust us." The plan is a tightly
+> scoped two-week Proof of Concept (PoC): prove one or two Amazon endpoints end to end,
+> keep decisions fail-closed, and do not call it production-ready until the source-proof
+> boundary, attestation governance, privacy, and failure handling pass review. For the
+> current status of what is actually built, see
+> [docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md).
+>
+> Acronyms expanded on first use below: SP-API (Selling Partner API, Amazon's seller
+> data API), LWA (Login with Amazon), Nitro Enclave (an isolated, tamper-proof virtual
+> machine), PCR (Platform Configuration Register, a hash fingerprinting the enclave
+> image), EIF (Enclave Image File), TLSNotary (a protocol that proves an HTTPS response
+> came from a specific server), RDT (Restricted Data Token), RACI (Responsible,
+> Accountable, Consulted, Informed), RAID (Risks, Assumptions, Issues, Dependencies).
+
 ## Executive Proposal and Two-Week Implementation Plan
 
 **Audience:** Olea senior leadership, engineering, security, risk, and operations stakeholders  

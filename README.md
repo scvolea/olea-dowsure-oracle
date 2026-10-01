@@ -1,106 +1,91 @@
 # Olea-Dowsure Verifiable Data Oracle
 
-This repository is the working PoC for a verifiable data ingestion flow that uses:
+This repository is a working Proof of Concept (PoC) for a **verifiable data oracle**:
+a way to fetch data, process it inside a tamper-proof computer, and hand Olea a
+cryptographic receipt it can check without trusting the party that fetched the data.
 
-- a real AWS Nitro Enclave,
-- attestation verification against AWS Nitro root material,
-- PCR and enclave-key validation,
-- a bounded mock source flow,
-- and a Dowsure/Olea evidence verification handshake.
+## Plain-English summary (read this first)
 
-This is not a production Amazon-side integration yet. It is a controlled trust-validation prototype designed to prove the architecture works before onboarding real upstream data sources.
+Imagine a sealed, tamper-proof box (an **AWS Nitro Enclave** - an isolated virtual
+machine with no storage and no normal network) that fetches data, transforms it, and
+signs a receipt proving exactly which code ran. Olea can verify that receipt against
+Amazon's own trust material. This PoC proves that sealed-box-and-receipt part works
+with real AWS evidence.
 
-## What is done
+What it does **not** yet prove is that the fetched data genuinely came from Amazon.
+That needs a **TLSNotary** proof (a protocol that proves a specific HTTPS response
+really came from a specific server). The code today only runs a placeholder check for
+that, so the project is deliberately "fail-closed": it refuses to claim more than it
+can prove.
 
-The PoC already proves the following end-to-end trust path:
+For the exact, up-to-date status (what is verified, what is open), there is **one**
+source of truth: [docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md). This
+README does not repeat the hard numbers (enclave fingerprints, host IDs); it links to
+the matrix instead.
 
-- a Java enclave is running in a real Nitro-capable EC2 environment,
-- the enclave is launched from an EIF and runs without debug mode,
-- attestation is produced from Nitro NSM instead of a synthetic mock,
-- the attestation document is validated with the AWS Nitro root certificate,
-- PCR0, PCR1, and PCR2 are checked,
-- the attested public key and canonicalized user_data bindings are verified,
-- the enclave response is hashed and transformed deterministically,
-- the hash chain is accepted by the verifier in the live non-debug case,
-- the EIF digest was registered in the preprod release registry as active.
+## What is in this repository (every folder)
 
-### Verified live status
+| Folder | What lives there |
+| --- | --- |
+| [sam/](sam/README.md) | AWS Serverless Application Model (SAM) apps: the real Olea verifier, a mock Dowsure orchestration layer, and a mock upstream Application Programming Interface (API). |
+| [nitro-enclave/](nitro-enclave/README.md) | The Java AWS Nitro Enclave application, its Dockerfile, Maven build, and Enclave Image File (EIF) / runtime notes. |
+| [coordinator/](coordinator) | The Python coordinator that drives the challenge, the enclave over a virtual socket (vsock), and the evidence envelope. |
+| [infra/](infra) | CloudFormation infrastructure, including the Nitro EC2 host template. |
+| [scripts/](scripts) | Node.js and PowerShell helpers for evidence capture and validation. |
+| [tests/](tests) | Test harnesses (Python coordinator tests, Node verifier tests). |
+| [archive/](archive) | Historical design notes kept for traceability only - clearly banner-marked ARCHIVED. |
+| [docs/](docs) | The living documentation set (status matrix, flows, source endpoints, quickstart, architecture diagram). |
+| [api-mocks/](api-mocks) | Ground-truth HTML flow references (onboarding, Super Purchase Order, repayment). Present only on the sandbox-handoff branch. |
 
-The current evidence indicates:
+## Documentation index (every document)
 
-- enclave is running as `olea-orders-java`,
-- Java AF_VSOCK path is active on port `5005`,
-- live attestation passed AWS Root-G1 validation,
-- COSE and certificate chain checks passed,
-- PCR and public-key verification passed,
-- `user_data` binding passed,
-- exact EIF SHA-256 was registered as active.
+Start with the status matrix, then the flows, then the design docs.
 
-## What is not complete
+**Status and orientation**
 
-This is the important part:
+- [docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md) - the single source of truth for status facts. Everything else links here.
+- [docs/QUICKSTART.md](docs/QUICKSTART.md) - a short "start here" index.
+- [docs/FLOWS.md](docs/FLOWS.md) - the five end-to-end flows traced against the actual code.
+- [docs/SOURCE_ENDPOINTS.md](docs/SOURCE_ENDPOINTS.md) - which Amazon Selling Partner API (SP-API) endpoint maps to which data category, plus the Super Purchase Order eligibility formula.
+- [docs/ARCHITECTURE_DIAGRAM.md](docs/ARCHITECTURE_DIAGRAM.md) - the architecture diagram with a plain-language walkthrough.
+- [opinions.md](opinions.md) - the decision and reasoning log: what was done, what was deliberately not done, and why.
 
-- the project does not yet have a real TLSNotary prover/notary integration,
-- the proof system in the code is a contract check, not a real TLSNotary proof validation,
-- the current source flow is still a controlled mock endpoint,
-- the full Olea acceptance receipt and real upstream source-proof flow remain open work.
+**Design (canonical baseline)**
 
-This project is therefore best described as a real attestation-and-verification PoC with a blocked TLSNotary gate.
+- [olea-dowsure-executive-proposal.md](olea-dowsure-executive-proposal.md) - the leadership-facing proposal, responsibility model, and two-week plan.
+- [olea-dowsure-technical-design.md](olea-dowsure-technical-design.md) - the full technical architecture, threat model, and interface design.
 
-## Why TLSNotary is blocked here
+**Handoffs**
 
-We cannot simply “do TLS” in the normal sense for this use case because the requirement is not just HTTPS. The requirement is source proof that the exact upstream response was seen over a TLS connection and that the proof is accepted by a trusted notary.
+- [IMPLEMENTATION_AGENT_HANDOFF.md](IMPLEMENTATION_AGENT_HANDOFF.md) - the single internal handoff for the next implementer (mission, verified state, next steps, acceptance / Definition of Done).
+- [dowsure-implementation-handoff.md](dowsure-implementation-handoff.md) - the Dowsure-facing handoff with the defined interfaces and diagrams.
 
-That requires all of the following to exist and to be compatible with the actual endpoint:
+**Component and SAM docs**
 
-- a TLSNotary-compatible upstream endpoint,
-- a prover/client that can participate in the handshake,
-- a notary service that signs the proof,
-- an approved notary public key that Olea trusts,
-- a forwarding/proxy path acceptable to the endpoint,
-- a verifier that checks the full proof bundle,
-- a request/response binding that matches the specific fetch and the hash we are validating.
+- [sam/README.md](sam/README.md) - overview of the SAM deployment units.
+- [nitro-enclave/README.md](nitro-enclave/README.md) - the enclave runtime notes.
+- [sam/docs/DEPLOYMENT_SUMMARY.md](sam/docs/DEPLOYMENT_SUMMARY.md) - deployment summary (status facts link to the matrix).
+- [sam/docs/POC_LIMITATIONS.md](sam/docs/POC_LIMITATIONS.md) - the honest limitations list (status facts link to the matrix).
+- [sam/docs/ARCHITECTURE_SUMMARY.md](sam/docs/ARCHITECTURE_SUMMARY.md) - a pointer to the single internal handoff.
 
-For this project, the blocker is not the enclave. The blocker is that the external notary/prover infrastructure and approved proof material are not available here. Without those, the code can only validate a hash-contract placeholder, not a real TLSNotary proof. That is why the implementation is deliberately fail-closed and flagged as incomplete.
+## What is done and what is open
 
-## Repository layout
+The trusted-execution and attestation layer is **verified** against live AWS
+evidence; the real source-authenticity (TLSNotary) layer is still an **open** gate.
+The Amazon SP-API sandbox and its credentials are now **available** for the next
+integration slice, so any older wording that calls the sandbox "blocked" or
+"unavailable" is out of date.
 
-- [sam](sam/README.md): SAM-based PoC deployment, verification function, and mock source setup.
-- [nitro-enclave](nitro-enclave/README.md): Java Nitro enclave implementation and EIF/runtime notes.
-- [coordinator](coordinator): coordinator and vsock flow logic.
-- [infra](infra): infrastructure-related materials.
-- [scripts](scripts): evidence and validation helpers.
-- [tests](tests): test harnesses and validation scripts.
-- [archive](archive): historical documents kept for traceability only.
-
-## Important documents
-
-- [olea-dowsure-executive-proposal.md](olea-dowsure-executive-proposal.md)
-- [olea-dowsure-technical-design.md](olea-dowsure-technical-design.md)
-- [dowsure-implementation-handoff.md](dowsure-implementation-handoff.md)
-- [IMPLEMENTATION_AGENT_HANDOFF.md](IMPLEMENTATION_AGENT_HANDOFF.md)
-- [sam/docs/ARCHITECTURE_SUMMARY.md](sam/docs/ARCHITECTURE_SUMMARY.md)
-- [sam/docs/POC_LIMITATIONS.md](sam/docs/POC_LIMITATIONS.md)
-
-## Plain-English summary
-
-If you only want the short version:
-
-- the enclave and attestation path are real,
-- the trust chain is verified,
-- the measurement was registered,
-- the current proof path is still incomplete because the real notary-backed TLS proof is missing,
-- we are not claiming Amazon-origin verification yet,
-- the project is a valid architecture and trust proof, but not a completed production source-integrity deployment.
+The exact facts (which stacks, which enclave fingerprints, which verified IDs) live
+only in [docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md).
 
 ## Recommended next step
 
-The next hard gate is to obtain:
-
-1. an approved TLSNotary prover,
-2. a compatible upstream endpoint,
-3. the approved notary public key,
-4. a real signed proof bundle,
-5. a verifier that enforces the real proof and request/response binding.
-
-Once those are provided, the code can be upgraded from “proof contract validation” to “real TLSNotary verification” and the acceptance flow can be closed.
+Per the status matrix and
+[IMPLEMENTATION_AGENT_HANDOFF.md](IMPLEMENTATION_AGENT_HANDOFF.md), the next slice
+exercises the available Amazon SP-API sandbox against the finances endpoints -
+Transactions (`GET /finances/2024-06-19/transactions`) and Financial Event Groups
+(`GET /finances/v0/financialEventGroups`) - and replaces the TLSNotary placeholder
+with a real signed proof from an approved notary. The implemented path today is still
+the bounded mock `GET_ORDERS` flow; the finances endpoints and sandbox are planned
+next, not yet wired in.

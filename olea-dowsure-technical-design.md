@@ -1,5 +1,28 @@
 # Olea-Dowsure Verifiable Data Oracle: Technical Architecture and Implementation Design
 
+> **Plain-English summary.** Olea cannot see Amazon's data directly; Dowsure fetches
+> it. The problem: a Dowsure signature only proves Dowsure signed something, not that
+> Amazon actually returned those values. This design fixes that by splitting trust into
+> four independent layers - (1) *source authenticity* (a proof that the data really
+> came from the provider, ideally a TLSNotary proof), (2) *execution authenticity* (an
+> AWS Nitro Enclave attestation proving the approved code ran), (3) *lineage integrity*
+> (hashes before and after a deterministic transformation), and (4) *acceptance and
+> retention* (Olea verifies, decides fail-closed, and stores evidence immutably). The
+> rest of this document specifies each layer, the endpoint proof policy, the threat
+> model, and the interfaces. For current status facts, see
+> [docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md).
+>
+> Acronyms expanded on first use below: SP-API (Selling Partner API, Amazon's seller
+> data API), LWA (Login with Amazon, Amazon's OAuth login), TLSNotary (a protocol that
+> proves a specific HTTPS response came from a specific server), Nitro Enclave (an
+> isolated, tamper-proof virtual machine with no storage and no normal network), PCR
+> (Platform Configuration Register, a hash fingerprinting the enclave image), EIF
+> (Enclave Image File, the artifact that boots inside the enclave), COSE (CBOR Object
+> Signing and Encryption) and CBOR (Concise Binary Object Representation, the
+> attestation document's signature and encoding formats), RDT (Restricted Data Token,
+> Amazon's token for consumer personal data), vsock (virtual socket, the enclave's only
+> communication channel), TEE (Trusted Execution Environment).
+
 ## Status
 
 Architecture Review Board approved with minor revisions. Proceed with a controlled proof of concept using one or two representative Amazon SP-API endpoints. Production commitment remains gated by exact endpoint compatibility and PoC evidence.
