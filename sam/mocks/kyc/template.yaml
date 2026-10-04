@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: API Gateway-only KYC contract mocks (AliCloud three-element, Qichacha enterprise+judicial, Gutu/Valuemap judicial panorama) for the Olea-Dowsure PoC.
+
+Parameters:
+  StageName:
+    Type: String
+    Default: mock
+
+Resources:
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: kyc-contract-mock
+      StageName: !Ref StageName
+      Auth:
+        ApiKeyRequired: true
+      DefinitionBody:
+        swagger: '2.0'
+        info: { title: KYC contract mock, version: '1.0' }
+        paths:
+          /lundear/telThree:
+            get:
+              parameters:
+                - { name: mobile, in: query, required: true, type: string }
+                - { name: name, in: query, required: true, type: string }
+                - { name: idcard, in: query, required: true, type: string }
+              responses: { '200': { description: Mock AliCloud three-element verification } }
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates: { application/json: '{"statusCode":200}' }
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseTemplates:
+                      {
+                        application/json: '{"code":"0","msg":"\u6210\u529f","data":{"result":1,"desc":"\u4e00\u81f4","orderNo":"ALI20231013094512003","mobile":"13800138000","name":"\u5f20\u4f1f","idcard":"110101199003078573"}}',
+                      }
+          /EnterpriseInfo/Verify:
+            get:
+              responses: { '200': { description: Mock Qichacha enterprise verification } }
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates: { application/json: '{"statusCode":200}' }
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseTemplates:
+                      {
+                        application/json: '{"Status":"200","Message":"\u67e5\u8be2\u6210\u529f","OrderNumber":"QCC2001202310130001","Result":{"KeyNo":"g9f3c0e1a2b74d6e8f0a1b2c3d4e5f60","Name":"\u6cc9\u5dde\u5e02\u98de\u4e50\u7535\u5b50\u5546\u52a1\u6709\u9650\u516c\u53f8","CreditCode":"91350500MA2XYABC1K","OperName":"\u5f20\u4f1f","Status":"\u5b58\u7eed","StartDate":"2016-05-12"}}',
+                      }
+          /ShixinCheck/GetList:
+            get:
+              responses: { '200': { description: Mock Qichacha dishonest-list check } }
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates: { application/json: '{"statusCode":200}' }
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseTemplates:
+                      {
+                        application/json: '{"Status":"200","Message":"\u67e5\u8be2\u6210\u529f","OrderNumber":"QCC0740202310130001","Result":[],"Paging":{"PageSize":10,"PageIndex":1,"TotalRecords":0}}',
+                      }
+          /ZhixingCheck/GetList:
+            get:
+              responses: { '200': { description: Mock Qichacha enforcement-list check } }
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates: { application/json: '{"statusCode":200}' }
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseTemplates:
+                      {
+                        application/json: '{"Status":"200","Message":"\u67e5\u8be2\u6210\u529f","OrderNumber":"QCC0741202310130001","Result":[{"CaseCode":"(2021)\u95fd0505\u6267123\u53f7","ExecMoney":"50000","ExecCourtName":"\u6cc9\u5dde\u5e02\u4e30\u6cfd\u533a\u4eba\u6c11\u6cd5\u9662","CaseCreateTime":"2021-06-18"}],"Paging":{"PageSize":10,"PageIndex":1,"TotalRecords":1}}',
+                      }
+          /SumptuaryCheck/GetList:
+            get:
+              responses: { '200': { description: Mock Qichacha consumption-restriction check } }
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates: { application/json: '{"statusCode":200}' }
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseTemplates:
+                      {
+                        application/json: '{"Status":"200","Message":"\u67e5\u8be2\u6210\u529f","OrderNumber":"QCC0742202310130001","Result":[],"Paging":{"PageSize":10,"PageIndex":1,"TotalRecords":0}}',
+                      }
+          /BankruptcyCheck/GetList:
+            get:
+              responses: { '200': { description: Mock Qichacha bankruptcy check } }
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates: { application/json: '{"statusCode":200}' }
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseTemplates:
+                      {
+                        application/json: '{"Status":"200","Message":"\u67e5\u8be2\u6210\u529f","OrderNumber":"QCC0761202310130001","Result":[],"Paging":{"PageSize":10,"PageIndex":1,"TotalRecords":0}}',
+                      }
+          /api/v1/judicial/panorama-checks:
+            post:
+              responses: { '200': { description: Mock Gutu/Valuemap judicial panorama } }
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates: { application/json: '{"statusCode":200}' }
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseTemplates:
+                      {
+                        application/json: '{"code":200,"message":"success","requestId":"GUTU20231013094512abc","data":{"name":"\u5f20\u4f1f","idCardNo":"110101199003078573","mobile":"13800138000","serviceTier":"standard","riskLevel":"MEDIUM","judicialSummary":{"dishonestCount":0,"enforcementCount":1,"sumptuaryCount":0,"bankruptcyCount":0,"caseList":[{"caseNo":"(2021)\u95fd0505\u6267123\u53f7","caseType":"\u6267\u884c","court":"\u6cc9\u5dde\u5e02\u4e30\u6cfd\u533a\u4eba\u6c11\u6cd5\u9662","amount":"50000","filingDate":"2021-06-18"}]}}}',
+                      }
+
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: ApiStage
+    Properties:
+      UsagePlanName: kyc-contract-mock-usage-plan
+      ApiStages:
+        - ApiId: !Ref Api
+          Stage: !Ref StageName
+
+  ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn: ApiStage
+    Properties:
+      Name: kyc-contract-mock-key
+      Enabled: true
+
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref UsagePlan
+
+Outputs:
+  ApiUrl:
+    Value: !Sub https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}
+  ApiKeyId:
+    Value: !Ref ApiKey
