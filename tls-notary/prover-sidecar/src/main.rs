@@ -52,7 +52,9 @@ use tlsn_core::{
     transcript::TranscriptCommitConfig,
     CryptoProvider,
 };
-use tlsn_formats::http::{DefaultHttpCommitter, HttpCommit, HttpTranscript};
+use tlsn_formats::http::{
+    parse_request, parse_response, DefaultHttpCommitter, HttpCommit, HttpTranscript,
+};
 use tlsn_prover::{Prover, ProverConfig};
 
 const USER_AGENT: &str =
@@ -275,8 +277,33 @@ async fn main() -> Result<()> {
     let mut prover = prover_task.await??;
 
     // 5) Commit to the transcript and request the attestation (notarize).
-    let transcript = HttpTranscript::parse(prover.transcript())
-        .map_err(|e| anyhow!("parse http transcript: {e:?}"))?;
+    //
+    // Amazon sends `Connection: close`, so the recv transcript carries trailing
+    // close_notify / connection-close framing AFTER the HTTP response. The upstream
+    // whole-buffer HttpTranscript::parse rejects that trailing data
+    // ("trailing characters are present in source" from the JSON body parser). Parse
+    // exactly ONE request and ONE response instead (spansy bounds each message by
+    // Content-Length and ignores the trailing bytes), then build the HttpTranscript
+    // from them so commit/reveal operate on exactly the HTTP message byte range.
+    let sent_bytes = prover.transcript().sent();
+    let recv_bytes = prover.transcript().received();
+    let total_recv = recv_bytes.len();
+    let detected = http_message_end(recv_bytes).unwrap_or(total_recv);
+    tracing::info!(
+        http_message_len = detected,
+        total_recv_len = total_recv,
+        trailing_bytes = total_recv.saturating_sub(detected),
+        "bounding recv transcript to the HTTP message (excluding Connection: close framing)"
+    );
+
+    let request =
+        parse_request(sent_bytes).map_err(|e| anyhow!("parse http request: {e:?}"))?;
+    let response =
+        parse_response(recv_bytes).map_err(|e| anyhow!("parse http response: {e:?}"))?;
+    let transcript = HttpTranscript {
+        requests: vec![request],
+        responses: vec![response],
+    };
 
     let mut commit_builder = TranscriptCommitConfig::builder(prover.transcript());
     DefaultHttpCommitter::default()
@@ -298,10 +325,18 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| anyhow!("notarize: {e:?}"))?;
 
-    // 6) Build a presentation revealing the full transcript (selective-disclosure
-    //    capable; the Olea verifier narrows this in later steps).
-    let transcript = HttpTranscript::parse(secrets.transcript())
-        .map_err(|e| anyhow!("parse secrets transcript: {e:?}"))?;
+    // 6) Build a presentation revealing the HTTP message (bounded identically to the
+    //    commit side so the revealed response excludes the Connection: close framing).
+    let secret_sent = secrets.transcript().sent();
+    let secret_recv = secrets.transcript().received();
+    let request =
+        parse_request(secret_sent).map_err(|e| anyhow!("parse secrets request: {e:?}"))?;
+    let response =
+        parse_response(secret_recv).map_err(|e| anyhow!("parse secrets response: {e:?}"))?;
+    let transcript = HttpTranscript {
+        requests: vec![request],
+        responses: vec![response],
+    };
     let mut tp_builder = secrets.transcript_proof_builder();
     let req0 = &transcript.requests[0];
     tp_builder
@@ -378,4 +413,36 @@ fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
     hex::encode(h.finalize())
+}
+
+/// Returns the end offset (exclusive) of the single HTTP message at the front of
+/// `buf`: end-of-headers (CRLFCRLF) + Content-Length. Used only for logging and a
+/// sanity check; the authoritative range comes from spansy's parse_response.
+fn http_message_end(buf: &[u8]) -> Option<usize> {
+    let headers_end = buf
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|i| i + 4)?;
+    // Case-insensitive scan for "content-length:" in the header block.
+    let head = &buf[..headers_end];
+    let needle = b"content-length:";
+    let mut content_length = 0usize;
+    for start in 0..head.len() {
+        let end = start + needle.len();
+        if end <= head.len() && head[start..end].eq_ignore_ascii_case(needle) {
+            // Value runs to the CRLF after the colon.
+            let rest = &head[end..];
+            let line_end = rest
+                .windows(2)
+                .position(|w| w == b"\r\n")
+                .unwrap_or(rest.len());
+            content_length = std::str::from_utf8(&rest[..line_end])
+                .ok()?
+                .trim()
+                .parse::<usize>()
+                .ok()?;
+            break;
+        }
+    }
+    Some(headers_end + content_length)
 }
