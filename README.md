@@ -35,7 +35,7 @@ the matrix instead.
 | [tests/](tests) | Test harnesses (Python coordinator tests, Node verifier tests). |
 | [archive/](archive) | Historical design notes kept for traceability only - clearly banner-marked ARCHIVED. |
 | [docs/](docs) | The living documentation set (status matrix, flows, source endpoints, quickstart, architecture diagram). |
-| [api-mocks/](api-mocks) | Ground-truth HTML flow references (onboarding, Super Purchase Order, repayment). Present only on the sandbox-handoff branch. |
+| [api-mocks/](api-mocks) | Ground-truth HTML flow references (onboarding, Super Purchase Order, repayment), tracked in this branch. |
 
 ## Documentation index (every document)
 
