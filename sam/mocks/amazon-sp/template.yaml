@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: API Gateway-only Amazon SP-API contract mock stack returning verbatim sandbox-capture bodies, fronted by an API key + usage plan. Independent of the KYC stack.
+
+Parameters:
+  StageName:
+    Type: String
+    Default: mock
+
+Resources:
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: amazon-sp-api-contract-mock
+      StageName: !Ref StageName
+      Auth:
+        ApiKeyRequired: true
+      DefinitionBody:
+        swagger: '2.0'
+        info: { title: Amazon SP-API contract mock, version: '1.0' }
+        paths:
+          /sales/v1/orderMetrics:
+            get:
+              responses: { '200': { description: Mock getOrderMetrics } }
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates: { application/json: '{"statusCode":200}' }
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseTemplates:
+                      {
+                        application/json: '{"payload":[{"interval":"2019-08-01T00:00-07:00--2018-08-03T00:00-07:00","unitCount":2,"orderItemCount":2,"orderCount":2,"averageUnitPrice":{"amount":"12.5","currencyCode":"USD"},"totalSales":{"amount":"25","currencyCode":"USD"}}]}',
+                      }
+          /finances/v0/financialEventGroups:
+            get:
+              responses: { '200': { description: Mock listFinancialEventGroups } }
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates: { application/json: '{"statusCode":200}' }
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseTemplates:
+                      {
+                        application/json: '{"payload":{"NextToken":"3493805734095308457308475","FinancialEventGroupList":[{"FinancialEventGroupId":"1","ProcessingStatus":"PROCESSED","FundTransferStatus":"TRANSFERED","OriginalTotal":{"CurrencyCode":"USD","CurrencyAmount":10.34},"ConvertedTotal":{"CurrencyCode":"USD","CurrencyAmount":39.43},"FundTransferDate":"2020-02-07T14:38:42.128Z","TraceId":"34550454504545","AccountTail":"4854564857","BeginningBalance":{"CurrencyCode":"USD","CurrencyAmount":55.33},"FinancialEventGroupStart":"2020-02-07T14:38:42.128Z","FinancialEventGroupEnd":"2020-02-07T14:38:42.128Z"}]}}',
+                      }
+          /finances/2024-06-19/transactions:
+            get:
+              responses: { '200': { description: Mock listTransactions } }
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates: { application/json: '{"statusCode":200}' }
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseTemplates:
+                      {
+                        application/json: '{"payload":{"nextToken":"Next token value","transactions":[{"sellingPartnerMetadata":{"sellingPartnerId":"A3TH9S8BH6GOGM","accountType":"PAYABLE","marketplaceId":"ATIV93840DER"},"relatedIdentifiers":[{"relatedIdentifierName":"FINANCIAL_EVENT_GROUP_ID","relatedIdentifierValue":"4MVaHcsAfaYAlwlaPWrXJxrfUiKfYZ2ooWtY7528FUA"},{"relatedIdentifierName":"ORDER_ID","relatedIdentifierValue":"8129762527551"}],"transactionType":"Shipment","postedDate":"2020-07-14T03:35:13.214Z","totalAmount":{"currencyAmount":10,"currencyCode":"USD"}}]}}',
+                      }
+
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: amazon-sp-api-contract-mock-plan
+      ApiStages:
+        - ApiId: !Ref Api
+          Stage: !Ref StageName
+    DependsOn: ApiStage
+
+  ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: amazon-sp-api-contract-mock-key
+      Enabled: true
+    DependsOn: ApiStage
+
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref UsagePlan
+
+Outputs:
+  ApiUrl:
+    Value: !Sub https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${StageName}
+  ApiKeyId:
+    Description: API key ID. Retrieve the value with `aws apigateway get-api-key --api-key <id> --include-value`.
+    Value: !Ref ApiKey
