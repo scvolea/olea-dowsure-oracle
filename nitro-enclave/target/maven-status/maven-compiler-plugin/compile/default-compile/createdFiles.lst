@@ -1,8 +1,0 @@
-com\olea\dowsure\enclave\AttestationProvider.class
-com\olea\dowsure\enclave\JnaAttestationProvider.class
-com\olea\dowsure\enclave\JnaAttestationProvider$NativeNsm.class
-com\olea\dowsure\enclave\EnclaveMain$1.class
-com\olea\dowsure\enclave\VsockServer.class
-com\olea\dowsure\enclave\EnclaveMain.class
-com\olea\dowsure\enclave\EnclaveService.class
-com\olea\dowsure\enclave\VsockServer$RequestHandler.class

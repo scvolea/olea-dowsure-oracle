@@ -1,2 +1,15 @@
 # Binary documents should not be committed; keep the Markdown source instead.
 *.pdf
+
+# Local credentials and secrets - never commit real values
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+nitro-enclave/target/
+**/*.class
+
+# Agent worktrees and scratch
+.worktrees/
+tmp/
