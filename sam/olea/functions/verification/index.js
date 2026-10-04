@@ -7,6 +7,7 @@ const {KMSClient, SignCommand} = require('@aws-sdk/client-kms');
 const {PutObjectCommand, S3Client} = require('@aws-sdk/client-s3');
 const {verifyNitroAttestation} = require('./attestation-verifier');
 const {buildManifest, canonicalize, sha256, validateEnvelope, verifyEnclaveSignature} = require('./verification-contract');
+const {verifyTlsNotaryProof, validateNonceBinding} = require('./tlsnotary-verifier');
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const kms = new KMSClient({});
@@ -64,7 +65,7 @@ async function issueChallenge(body) {
 }
 
 async function submitEvidence(body) {
-  const required = ['requestId', 'evidenceId', 'nonce', 'policyVersion', 'source', 'endpoint', 'encryptedEvidenceReference', 'manifestDigest', 'submissionEnvelope', 'submissionSignature', 'rawPayload', 'rawPayloadDigest', 'transformedPayload', 'transformedPayloadDigest', 'canonicalizationVersion', 'tlsProofType', 'tlsProofHash', 'tlsProofResponseHash', 'attestationDocument', 'attestedPublicKeyBase64', 'enclaveSignature', 'eifDigest', 'pcr0', 'pcr1', 'pcr2'];
+  const required = ['requestId', 'evidenceId', 'nonce', 'policyVersion', 'source', 'endpoint', 'encryptedEvidenceReference', 'manifestDigest', 'submissionEnvelope', 'submissionSignature', 'rawPayload', 'rawPayloadDigest', 'transformedPayload', 'transformedPayloadDigest', 'canonicalizationVersion', 'tlsProofType', 'tlsProofHash', 'tlsProofResponseHash', 'tlsProof', 'attestationDocument', 'attestedPublicKeyBase64', 'enclaveSignature', 'eifDigest', 'pcr0', 'pcr1', 'pcr2'];
   if (!body || required.some((field) => !body[field])) return response(400, {status: 'REJECTED', reasonCode: 'PAYLOAD_CORRUPTED'});
 
   const challenge = await get(process.env.CHALLENGE_TABLE, {requestId: body.requestId});
@@ -92,6 +93,8 @@ async function submitEvidence(body) {
     if (!release.dowsurePublicKeyPem || !verifySignature(release.dowsurePublicKeyPem, envelope, body.submissionSignature)) throw new Error('DOWSURE_SIGNATURE_INVALID');
     verifyEnclaveSignature(body, manifest);
     verifyNitroAttestation(body.attestationDocument, {...release, attestedPublicKeyBase64: body.attestedPublicKeyBase64}, {requestId: body.requestId, nonce: body.nonce, policyVersion: body.policyVersion, rawHash: body.rawPayloadDigest, transformedHash: body.transformedPayloadDigest, publicKey: body.attestedPublicKeyBase64});
+    validateNonceBinding(challenge, body);
+    verifyTlsNotaryProof(body.tlsProof, {spApiHost: process.env.SP_API_HOST, rawPayloadDigest: body.rawPayloadDigest, maxAgeSeconds: Number(process.env.TLS_PROOF_MAX_AGE_SECONDS), nonce: challenge.nonce});
   } catch (error) {
     const reasonCode = error.message === 'DOWSURE_SIGNATURE_INVALID' ? error.message : error.message;
     return response(422, {status: 'REJECTED', reasonCode});

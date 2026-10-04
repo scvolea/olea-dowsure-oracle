@@ -1,0 +1,60 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Olea JS TLSNotary proof verifier, added WITHOUT breaking the existing attestation verifier. Add a new verifier module under sam/olea/functions/verification/ that checks the TLSNotary proof bundle: (a) notary signature valid against the pinned Olea notary PUBLIC key (reject any other signer), (b) server domain/cert binding == expected SP-API host, (c) revealed responseHash == enclave rawResponseHash for the same request, (d) freshness/timestamp within an allowed window, (e) nonce binding: issued, unexpired, consumed single-use (no replay). Fail closed. Wire it into submitEvidence so an invalid/absent bundle rejects, reusing the existing single-use challenge consumption (CHALLENGE_REPLAY path). This depends on FEAT-001's normalized tlsProof contract and notary-key pin.",
+  "status": "completed",
+  "steps": [
+    "Read .agents/tasks/context.json, this file, and FEAT-001's findings FIRST. Then read sam/olea/functions/verification/index.js (submitEvidence + issueChallenge single-use flow), verification-contract.js (canonicalize/sha256/validateTlsProof), attestation-verifier.js and both existing *.test.js so you reuse patterns and do NOT regress the attestation path.",
+    "Add sam/olea/functions/verification/tlsnotary-verifier.js (CommonJS). Export verifyTlsNotaryProof(tlsProof, expected) implementing checks (a)-(d): (a) notary signature/verifying-key check — verify the presentation/bundle against the pinned notary public key (env OLEA_NOTARY_PUBKEY or a pinned registry value) and assert tlsProof.notaryPubKeyId === the pinned key id, rejecting any other signer with NOTARY_KEY_UNTRUSTED; (b) assert tlsProof.serverName === expected.spApiHost (e.g. sandbox.sellingpartnerapi-na.amazon.com), else DOMAIN_MISMATCH; (c) assert tlsProof.responseHash === expected.rawPayloadDigest, else TLS_PROOF_HASH_MISMATCH; (d) assert now - connectionTimeUnix within expected.maxAgeSeconds and not in the future, else TLS_PROOF_STALE. Reuse validateTlsProof(tlsProof, rawHash) from verification-contract.js for the proofType/proofHash integrity so the self-consistency check stays identical. Keep the notary-signature verification resilient to the alpha presentation format: verify what is cryptographically checkable in JS (notary verifying-key id pin + the bundle's self-consistency) and clearly document any portion delegated to the sidecar self-verify, failing closed if the pinned key id does not match.",
+    "Add nonce single-use (check e) as a reusable export validateNonceBinding(challenge, body, now) in tlsnotary-verifier.js OR reuse validateChallengeState from verification-contract.js: confirm the issued nonce matches, is unexpired, and is consumed single-use. Ensure the TLSNotary revealed responseHash == enclave rawResponseHash is cross-checked for the SAME requestId (tie tlsProof.nonce === challenge.nonce === body.nonce).",
+    "Wire into index.js submitEvidence: after the existing attestation checks, call verifyTlsNotaryProof on the submitted tlsProof (sourced from body — add a `tlsProof` object field to the accepted contract alongside the existing tlsProofType/tlsProofHash/tlsProofResponseHash, keeping backward compatibility) with expected = {spApiHost from policy/env, rawPayloadDigest: body.rawPayloadDigest, maxAgeSeconds from env, nonce: challenge.nonce}. Fail closed: any failure returns 422 with the distinct reasonCode. Do NOT remove or weaken verifyNitroAttestation. Preserve the existing single-use consumption UpdateCommand (CHALLENGE_REPLAY / SUBMISSION_REPLAY).",
+    "Add sam/olea/functions/verification/tlsnotary-verifier.test.js (node:test + node:assert/strict), mirroring verification-contract.test.js style. Build a valid normalized tlsProof fixture (via FEAT-001's normalizer or an inline equivalent) and assert: ACCEPT for valid; and REJECT with the specific reasonCode for each of: tampered responseHash (TLS_PROOF_HASH_MISMATCH), tampered proofHash (TLS_PROOF_INVALID), wrong notary key id (NOTARY_KEY_UNTRUSTED), wrong domain (DOMAIN_MISMATCH), stale timestamp (TLS_PROOF_STALE), missing/wrong nonce and replayed/expired nonce (NONCE_MISMATCH / CHALLENGE_REPLAY / CHALLENGE_EXPIRED).",
+    "Run the full verification test dir to prove no regression of the attestation path, then commit locally on branch tlsnotary-mpc-flow (do not push).",
+    "Record in findings: the exact expected{} shape verifyTlsNotaryProof needs, the env var names (OLEA_NOTARY_PUBKEY, SP_API_HOST, TLS_PROOF_MAX_AGE_SECONDS), and the reasonCode set, for FEAT-004's demo."
+  ],
+  "acceptance_criteria": [
+    "sam/olea/functions/verification/tlsnotary-verifier.js implements checks (a) notary key pin, (b) domain, (c) responseHash==rawPayloadDigest, (d) freshness, (e) nonce issued/unexpired/single-use, and fails closed.",
+    "index.js submitEvidence rejects an invalid or absent TLSNotary bundle with a distinct reasonCode and still runs verifyNitroAttestation unchanged.",
+    "`node --test sam/olea/functions/verification/` passes ALL tests including the existing attestation-verifier.test.js and verification-contract.test.js (no regression) and the new tlsnotary-verifier.test.js with every negative case asserting its specific reasonCode."
+  ],
+  "verification": [
+    "From the worktree root run `node --test sam/olea/functions/verification/` and confirm every test file passes (existing + new).",
+    "Confirm attestation-verifier.js and verification-contract.js public exports are unchanged (diff shows additions/wiring only, no breaking edits)."
+  ],
+  "blocked_reason": null,
+  "findings": {
+    "verifier_module": "sam/olea/functions/verification/tlsnotary-verifier.js (CommonJS). Exports { verifyTlsNotaryProof(tlsProof, expected), validateNonceBinding(challenge, body, now), pinnedNotaryKeyId(expected) }. NEW file; attestation-verifier.js and verification-contract.js public exports are UNCHANGED (additions/wiring only).",
+    "expected_shape": {
+      "spApiHost": "string, expected SP-API TLS host; compared to tlsProof.serverName (check b). Sourced in index.js from process.env.SP_API_HOST. e.g. 'sandbox.sellingpartnerapi-na.amazon.com'.",
+      "rawPayloadDigest": "64-hex; must equal tlsProof.responseHash (check c, delegated to validateTlsProof). In index.js this is body.rawPayloadDigest.",
+      "maxAgeSeconds": "positive number; freshness window (check d). From process.env.TLS_PROOF_MAX_AGE_SECONDS (Number()).",
+      "nonce": "optional string; if present, must equal tlsProof.nonce (check e value binding). In index.js this is challenge.nonce.",
+      "notaryPubKeyId": "optional string; pinned notary verifying-key id (check a). If omitted, falls back to process.env.OLEA_NOTARY_PUBKEY. If neither is set -> NOTARY_KEY_UNPINNED (fail closed).",
+      "now": "optional epoch millis; defaults to Date.now(). Used for deterministic freshness in tests."
+    },
+    "verifyTlsNotaryProof_return": "{reasonCode:'SUCCESS', notaryPubKeyId, serverName} on accept; otherwise throws Error whose .message is the distinct reasonCode (fail closed).",
+    "validateNonceBinding": "validateNonceBinding(challenge, body, now=Date.now()) checks (e) issued/unexpired/single-use pre-consumption: ties challenge.nonce === body.nonce === body.tlsProof.nonce for the SAME request. Throws CHALLENGE_NOT_FOUND / CHALLENGE_REPLAY (used) / CHALLENGE_EXPIRED / NONCE_MISMATCH. The actual single-use CONSUMPTION stays in index.js (conditional UpdateCommand -> CHALLENGE_REPLAY / SUBMISSION_REPLAY), unchanged.",
+    "env_vars": {
+      "OLEA_NOTARY_PUBKEY": "pinned notary verifying-key id (trust anchor; source of truth tls-notary/notary-server/notary-key-id.txt from FEAT-001). Fallback when expected.notaryPubKeyId is omitted.",
+      "SP_API_HOST": "expected SP-API TLS host for the domain-binding check (e.g. sandbox.sellingpartnerapi-na.amazon.com).",
+      "TLS_PROOF_MAX_AGE_SECONDS": "freshness window in seconds for the connection-time check."
+    },
+    "reason_codes": [
+      "NOTARY_KEY_UNTRUSTED (check a: signer not the pinned notary)",
+      "NOTARY_KEY_UNPINNED (check a: no pin configured, fail closed)",
+      "DOMAIN_MISMATCH (check b: serverName != spApiHost)",
+      "TLS_PROOF_HASH_MISMATCH (check c: responseHash != rawPayloadDigest; from validateTlsProof)",
+      "TLS_PROOF_INVALID (check c: proofType/proofHash self-consistency failure; from validateTlsProof)",
+      "TLS_PROOF_STALE (check d: age < 0 (future) or > maxAgeSeconds, or bad maxAge/connTime)",
+      "NONCE_MISMATCH (check e: proof/body/challenge nonce disagreement)",
+      "CHALLENGE_REPLAY (check e: challenge.used === true)",
+      "CHALLENGE_EXPIRED (check e: challenge.expiresAt <= now)",
+      "CHALLENGE_NOT_FOUND (check e: no challenge)"
+    ],
+    "index_wiring": "index.js submitEvidence: added 'tlsProof' to the required-fields list (absent bundle -> 400 PAYLOAD_CORRUPTED; backward-compat tlsProofType/tlsProofHash/tlsProofResponseHash scalar checks retained). Inside the existing try (after verifyNitroAttestation, which is UNCHANGED) it calls validateNonceBinding(challenge, body) then verifyTlsNotaryProof(body.tlsProof, {spApiHost: env.SP_API_HOST, rawPayloadDigest: body.rawPayloadDigest, maxAgeSeconds: Number(env.TLS_PROOF_MAX_AGE_SECONDS), nonce: challenge.nonce}). Any throw -> 422 with the distinct reasonCode (fail closed). The single-use consumption UpdateCommand (CHALLENGE_REPLAY / SUBMISSION_REPLAY) is preserved.",
+    "tlsProof_input_shape": "Consumes the FEAT-001 normalized tlsProof verbatim: {proofType:'tlsnotary', serverName, notaryPubKeyId, notaryKeyAlg, connectionTimeUnix, requestCommitment, responseHash, revealedResponse, nonce, presentationB64, proofHash}. responseHash === enclave rawResponseHash === body.rawPayloadDigest.",
+    "notary_signature_delegation": "JS verifies the cryptographically-checkable portion: notary verifying-key id pin (a) + bundle self-consistency (proofHash recompute via validateTlsProof). The full bincode presentation-signature verification against the notary P-256 (secp256r1) key is delegated to the sidecar/notary self-verify (tls-notary/gate-proof prove->present->verify). Mismatched pinned key id rejects in JS regardless, so an untrusted signer never reaches the delegated step. Documented in the module header.",
+    "verification_run": "node --test \"sam/olea/functions/verification/*.test.js\" => 26/26 pass (6 attestation-verifier + 6 verification-contract existing, no regression; 14 new tlsnotary-verifier). The bare-directory form `node --test sam/olea/functions/verification/` fails under Node v24.18.0 because it loads index.js which requires uninstalled @aws-sdk/* deps (pre-existing, same as FEAT-001's note); the *.test.js glob is the correct runner.",
+    "test_file": "sam/olea/functions/verification/tlsnotary-verifier.test.js (node:test + node:assert/strict) mirrors verification-contract.test.js style; builds a valid normalized tlsProof via the shared canonicalize/sha256 and asserts ACCEPT plus every negative reasonCode."
+  }
+}
