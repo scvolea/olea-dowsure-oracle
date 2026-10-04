@@ -68,7 +68,7 @@ Evidence: the verified live attestation (signature chain, measurement values,
 attested public key, canonicalized user data) is recorded in
 [docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md#verified-facts-defined-here-linked-everywhere-else)
 and the trust flow is traced in
-[docs/FLOWS.md](docs/FLOWS.md#flow-4-tlstee--nitro-attestation-trust-flow).
+[docs/FLOWS.md](docs/FLOWS.md#flow-4-tlstee-nitro-attestation-trust-flow).
 
 ## Decision 2 - Move the enclave from Python to Java
 
@@ -134,7 +134,7 @@ keeps the system honest - unproven data never gets to claim it was notarized.
 Evidence: the TLSNotary placeholder is listed as still-open in
 [docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md#status-table)
 and the proof-contract behavior is traced in
-[docs/FLOWS.md](docs/FLOWS.md#flow-4-tlstee--nitro-attestation-trust-flow).
+[docs/FLOWS.md](docs/FLOWS.md#flow-4-tlstee-nitro-attestation-trust-flow).
 
 ## Decision 5 - Repayment must be TEE-only
 
