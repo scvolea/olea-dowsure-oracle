@@ -1,0 +1,15 @@
+{
+  "_comment": "REDACTED sample MPC-TLS prover-sidecar proof bundle (fixture mode). This is the snake_case stdout JSON the thin upstream tlsn-prover sidecar emits after ONE notarized GET. It is checked in as a REDACTED fixture: the x-amz-access-token header VALUE has been removed from the sent preview (replaced with the literal <redacted> marker), there is NO real LWA token, NO secret, and NO real PII. The order data is synthetic. The notary_pub_key_id below is an example-shape P-256 key id (NOT a real key). scripts/tlsnotary-e2e-demo.js loads this, normalizes it via tls-notary/bundle/normalize-bundle.js, and drives the full ACCEPT + REJECT flow with NO credentials and NO Rust compile.",
+  "ok": true,
+  "server_name": "sandbox.sellingpartnerapi-na.amazon.com",
+  "notary_key_alg": "secp256r1",
+  "notary_pub_key_id": "0399b01d8ba1c0e9f2a7b3c4d5e6f70819283a4b5c6d7e8f90a1b2c3d4e5f6a7b8",
+  "connection_time_unix": 1690000000,
+  "request_commitment": "361eb9f6868cc3fd50146522e055ba67d5df1cd46111fdbeaf47ba1aeb69c4dc",
+  "response_hash": "PLACEHOLDER_RECOMPUTED_BY_DEMO",
+  "revealed_sent_preview": "GET /sales/v1/orderMetrics?marketplaceIds=ATVPDKIKX0DER&granularity=Total HTTP/1.1\r\nHost: sandbox.sellingpartnerapi-na.amazon.com\r\nx-amz-access-token: <redacted>\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close",
+  "revealed_recv_preview": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"payload\":[{\"interval\":\"2022-08-01T00:00:00-07:00--2022-08-02T00:00:00-07:00\",\"unitCount\":12,\"orderItemCount\":12,\"orderCount\":9,\"averageUnitPrice\":{\"amount\":\"24.50\",\"currencyCode\":\"USD\"},\"totalSales\":{\"amount\":\"294.00\",\"currencyCode\":\"USD\"}}]}",
+  "nonce": "PLACEHOLDER_SET_BY_DEMO",
+  "attestation_b64": "ZXhhbXBsZS1hdHRlc3RhdGlvbi1iaW5jb2RlLXBsYWNlaG9sZGVy",
+  "presentation_b64": "ZXhhbXBsZS1wcmVzZW50YXRpb24tYmluY29kZS1wbGFjZWhvbGRlcg=="
+}

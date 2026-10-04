@@ -1,0 +1,47 @@
+# Standalone Olea-hosted TLSNotary notary-server config (TEMPLATE).
+#
+# This runs the PREBUILT upstream image
+#   ghcr.io/tlsnotary/tlsn/notary-server:v0.1.0-alpha.12
+# on a host SEPARATE from the Nitro EC2 instance. The notary participates only
+# in the MPC and signs attestations over commitments; it never sees plaintext
+# ("notary-learns-nothing"). Keeping it decoupled means that if Nitro is later
+# removed, the notary + prover-sidecar still work unchanged.
+#
+# The signing keypair is referenced BY PATH only. The private key is mounted at
+# runtime from a gitignored path (see .gitignore / docker-compose.yml) or, in
+# Fargate, injected from Secrets Manager/KMS (see DEPLOY-ECS-FARGATE.md). No
+# private key is ever inlined here.
+
+server:
+  name: "olea-notary-server"
+  host: "0.0.0.0"
+  # MPC socket the prover connects to. Decoupled from the Nitro host; reachable
+  # over an internal NLB / private DNS (e.g. notary.olea.internal:7047).
+  port: 7047
+
+# TLS for the notary's OWN listener (prover<->notary transport). This is the
+# transport cert, NOT the notarization signing key below. Terminate at the NLB
+# or mount a cert here; left disabled in this template for the internal case.
+tls:
+  enabled: false
+  # private_key_pem_path: "/secrets/notary-transport.key"   # gitignored path
+  # certificate_pem_path: "/secrets/notary-transport.crt"
+
+# The notarization SIGNING keypair. The notary signs attestations with the
+# private key; the Olea verifier pins the PUBLIC key (see notary.pub /
+# notary-key-id.txt) as an independent trust anchor and rejects any other
+# signer. Private key path is gitignored and mounted at runtime.
+notary_key:
+  private_key_pem_path: "/secrets/notary-signing.key"   # GITIGNORED — mounted at runtime
+  public_key_pem_path: "/keys/notary.pub"               # trust anchor, committed
+
+# Resource ceilings. Prover MPC resources are allocated up front, so these bound
+# the transcript sizes a session may notarize. Sized for the small SP-API JSON
+# responses (orderMetrics / financialEventGroups / transactions).
+notarization:
+  max_sent_data: 4096
+  max_recv_data: 16384
+
+logging:
+  level: "INFO"
+  # Never log request/response plaintext — the notary never sees it anyway.

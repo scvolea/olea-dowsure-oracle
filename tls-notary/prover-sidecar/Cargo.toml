@@ -1,0 +1,52 @@
+# Prover sidecar: a thin, headless glue crate around the UPSTREAM TLSNotary
+# prover. We do NOT author bespoke protocol/business Rust here; we drive the
+# upstream `tlsn-prover` / `notary-client` crates (pinned to the SAME release as
+# the notary-server image, v0.1.0-alpha.12) to perform one MPC-TLS notarized GET
+# and emit a proof bundle. All Olea application logic stays in Java + JS.
+#
+# Pinning note: the tlsn workspace itself pins mpz / tlsn-utils to specific git
+# revs. Depending on the tagged crates via git reproduces those pins transitively
+# through the upstream workspace lockfile resolution.
+[package]
+name = "tlsn-prover-sidecar"
+version = "0.1.0"
+edition = "2021"
+# >= 1.87 required: the pinned mpz dep (rev ccc0057) uses Vec::extract_if
+# (stabilized in Rust 1.87). 1.90 pinned for headroom.
+rust-version = "1.90"
+publish = false
+
+[[bin]]
+name = "tlsn-prover-sidecar"
+path = "src/main.rs"
+
+[dependencies]
+# --- Upstream TLSNotary crates, pinned to the notary-server image's release ---
+tlsn-prover = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.12" }
+tlsn-core = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.12" }
+tlsn-common = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.12" }
+tlsn-formats = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.12" }
+tlsn-tls-core = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.12" }
+notary-client = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.12" }
+# server-fixture crates are used ONLY by the --fixture self-test path (gate proof)
+tlsn-server-fixture = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.12" }
+tls-server-fixture = { git = "https://github.com/tlsnotary/tlsn.git", tag = "v0.1.0-alpha.12" }
+
+# --- Thin glue deps (same versions the upstream examples use) ---
+tokio = { version = "1.38", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+hyper = { version = "1.1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+spansy = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "6168663" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+base64 = "0.22"
+hex = "0.4"
+sha2 = "0.10"
+chrono = "0.4"
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive", "env"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"

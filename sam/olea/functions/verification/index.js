@@ -1,16 +1,45 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const {DynamoDBClient} = require('@aws-sdk/client-dynamodb');
-const {DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand} = require('@aws-sdk/lib-dynamodb');
-const {KMSClient, SignCommand} = require('@aws-sdk/client-kms');
-const {PutObjectCommand, S3Client} = require('@aws-sdk/client-s3');
 const {verifyNitroAttestation} = require('./attestation-verifier');
 const {buildManifest, canonicalize, sha256, validateEnvelope, verifyEnclaveSignature} = require('./verification-contract');
+const {verifyTlsNotaryProof, validateNonceBinding} = require('./tlsnotary-verifier');
 
-const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-const kms = new KMSClient({});
-const s3 = new S3Client({});
+// AWS SDK clients are constructed lazily so that merely importing this module
+// (as the Node test runner does when it scans this directory) never requires the
+// @aws-sdk/* packages. At runtime inside Lambda the SDK is present and the clients
+// are built on first use, so handler behavior is unchanged.
+let _dynamo;
+let _kms;
+let _s3;
+let _GetCommand;
+let _PutCommand;
+let _UpdateCommand;
+let _SignCommand;
+let _PutObjectCommand;
+
+function awsClients() {
+  if (!_dynamo) {
+    const {DynamoDBClient} = require('@aws-sdk/client-dynamodb');
+    const {DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand} = require('@aws-sdk/lib-dynamodb');
+    const {KMSClient, SignCommand} = require('@aws-sdk/client-kms');
+    const {PutObjectCommand, S3Client} = require('@aws-sdk/client-s3');
+    _dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+    _kms = new KMSClient({});
+    _s3 = new S3Client({});
+    _GetCommand = GetCommand;
+    _PutCommand = PutCommand;
+    _UpdateCommand = UpdateCommand;
+    _SignCommand = SignCommand;
+    _PutObjectCommand = PutObjectCommand;
+  }
+  return {
+    dynamo: _dynamo, kms: _kms, s3: _s3,
+    GetCommand: _GetCommand, PutCommand: _PutCommand, UpdateCommand: _UpdateCommand,
+    SignCommand: _SignCommand, PutObjectCommand: _PutObjectCommand
+  };
+}
+
 const APPROVED_ENDPOINTS = new Set(['GET_ORDERS']);
 
 function response(statusCode, body) {
@@ -22,6 +51,7 @@ function parseBody(event) {
 }
 
 async function get(tableName, key) {
+  const {dynamo, GetCommand} = awsClients();
   return (await dynamo.send(new GetCommand({TableName: tableName, Key: key, ConsistentRead: true}))).Item;
 }
 
@@ -54,6 +84,7 @@ async function issueChallenge(body) {
     used: false,
     ttl: Math.floor(expiresAt.getTime() / 1000)
   };
+  const {kms, dynamo, PutCommand, SignCommand} = awsClients();
   const digest = crypto.createHash('sha256').update(JSON.stringify(challenge)).digest();
   const signed = await kms.send(new SignCommand({KeyId: process.env.OLEA_SIGNING_KEY_ID, Message: digest, MessageType: 'DIGEST', SigningAlgorithm: 'ECDSA_SHA_256'}));
   challenge.challengeSignature = Buffer.from(signed.Signature).toString('base64');
@@ -64,8 +95,9 @@ async function issueChallenge(body) {
 }
 
 async function submitEvidence(body) {
-  const required = ['requestId', 'evidenceId', 'nonce', 'policyVersion', 'source', 'endpoint', 'encryptedEvidenceReference', 'manifestDigest', 'submissionEnvelope', 'submissionSignature', 'rawPayload', 'rawPayloadDigest', 'transformedPayload', 'transformedPayloadDigest', 'canonicalizationVersion', 'tlsProofType', 'tlsProofHash', 'tlsProofResponseHash', 'attestationDocument', 'attestedPublicKeyBase64', 'enclaveSignature', 'eifDigest', 'pcr0', 'pcr1', 'pcr2'];
+  const required = ['requestId', 'evidenceId', 'nonce', 'policyVersion', 'source', 'endpoint', 'encryptedEvidenceReference', 'manifestDigest', 'submissionEnvelope', 'submissionSignature', 'rawPayload', 'rawPayloadDigest', 'transformedPayload', 'transformedPayloadDigest', 'canonicalizationVersion', 'tlsProofType', 'tlsProofHash', 'tlsProofResponseHash', 'tlsProof', 'attestationDocument', 'attestedPublicKeyBase64', 'enclaveSignature', 'eifDigest', 'pcr0', 'pcr1', 'pcr2'];
   if (!body || required.some((field) => !body[field])) return response(400, {status: 'REJECTED', reasonCode: 'PAYLOAD_CORRUPTED'});
+  const {dynamo, s3, UpdateCommand, PutCommand, PutObjectCommand} = awsClients();
 
   const challenge = await get(process.env.CHALLENGE_TABLE, {requestId: body.requestId});
   if (!challenge) return response(404, {status: 'REJECTED', reasonCode: 'CHALLENGE_NOT_FOUND'});
@@ -91,7 +123,9 @@ async function submitEvidence(body) {
     validateEnvelope(body);
     if (!release.dowsurePublicKeyPem || !verifySignature(release.dowsurePublicKeyPem, envelope, body.submissionSignature)) throw new Error('DOWSURE_SIGNATURE_INVALID');
     verifyEnclaveSignature(body, manifest);
-    verifyNitroAttestation(body.attestationDocument, {...release, attestedPublicKeyBase64: body.attestedPublicKeyBase64}, {requestId: body.requestId, nonce: body.nonce, policyVersion: body.policyVersion, rawHash: body.rawPayloadDigest, transformedHash: body.transformedPayloadDigest, publicKey: body.attestedPublicKeyBase64});
+    verifyNitroAttestation(body.attestationDocument, {...release, attestedPublicKeyBase64: body.attestedPublicKeyBase64}, {requestId: body.requestId, nonce: body.nonce, policyVersion: body.policyVersion, rawHash: body.rawPayloadDigest, transformedHash: body.transformedPayloadDigest, publicKey: body.attestedPublicKeyBase64, tlsProofHash: body.tlsProofHash});
+    validateNonceBinding(challenge, body);
+    verifyTlsNotaryProof(body.tlsProof, {spApiHost: process.env.SP_API_HOST, rawPayloadDigest: body.rawPayloadDigest, maxAgeSeconds: Number(process.env.TLS_PROOF_MAX_AGE_SECONDS), nonce: challenge.nonce});
   } catch (error) {
     const reasonCode = error.message === 'DOWSURE_SIGNATURE_INVALID' ? error.message : error.message;
     return response(422, {status: 'REJECTED', reasonCode});
@@ -114,6 +148,7 @@ async function handler(event) {
   const body = parseBody(event);
   if (body === null) return response(400, {status: 'REJECTED', reasonCode: 'PAYLOAD_CORRUPTED'});
   const path = event.resource;
+  const {dynamo, PutCommand, UpdateCommand} = awsClients();
   try {
     if (event.httpMethod === 'POST' && path === '/v1/challenges') return issueChallenge(body);
     if (event.httpMethod === 'POST' && path === '/v1/evidence') return submitEvidence(body);

@@ -1,0 +1,32 @@
+{
+  "_comment": "REDACTED end-to-end transcript produced by scripts/tlsnotary-e2e-demo.js in fixture/mock mode (NO credentials, NO Rust compile). Captures the single ACCEPT for a valid bundle and the REJECT reasonCode for every negative case. The nonce is per-run (crypto.randomBytes) so the exact value differs each run; the illustrative nonce below is synthetic. NO x-amz-access-token, NO secret, and NO real PII appear here or in sample-bundle.json.",
+  "mode": "fixture/mock",
+  "credentials": "none",
+  "rustCompile": false,
+  "spApiHost": "sandbox.sellingpartnerapi-na.amazon.com",
+  "requestId": "req-e2e-demo-0001",
+  "notaryPubKeyId": "0399b01d8ba1c0e9f2a7b3c4d5e6f70819283a4b5c6d7e8f90a1b2c3d4e5f6a7b8",
+  "notaryKeyAlg": "secp256r1",
+  "nonceExample": "<per-run base64url nonce, e.g. 8zbafHMy5colVaMC9Tkox35HD6huhcS6HxDAgQYajYg>",
+  "enclaveUserDataBindingFields": [
+    "nonce",
+    "policyVersion",
+    "publicKey",
+    "rawHash",
+    "requestId",
+    "tlsProofHash",
+    "transformedHash"
+  ],
+  "scenarios": [
+    {"name": "valid bundle", "verdict": "ACCEPT", "reasonCode": "SUCCESS"},
+    {"name": "tampered response", "verdict": "REJECT", "reasonCode": "TLS_PROOF_HASH_MISMATCH"},
+    {"name": "tampered proof", "verdict": "REJECT", "reasonCode": "TLS_PROOF_INVALID"},
+    {"name": "wrong nonce", "verdict": "REJECT", "reasonCode": "NONCE_MISMATCH"},
+    {"name": "missing nonce", "verdict": "REJECT", "reasonCode": "NONCE_MISMATCH"},
+    {"name": "expired nonce", "verdict": "REJECT", "reasonCode": "CHALLENGE_EXPIRED"},
+    {"name": "replayed nonce", "verdict": "REJECT", "reasonCode": "CHALLENGE_REPLAY"},
+    {"name": "wrong notary key", "verdict": "REJECT", "reasonCode": "NOTARY_KEY_UNTRUSTED"},
+    {"name": "wrong domain", "verdict": "REJECT", "reasonCode": "DOMAIN_MISMATCH"}
+  ],
+  "summary": "1 ACCEPT + 8 REJECT reasonCodes; demo exits 0 and the node:test gate passes 11/11."
+}
