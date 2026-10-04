@@ -1,0 +1,13 @@
+# Rust build artifacts (never commit)
+target/
+**/target/
+Cargo.lock.bak
+
+# Gate-proof working data
+gate-proof/work/
+gate-proof/*.log
+verify-output.txt
+
+# Scratch
+_*
+*.log
