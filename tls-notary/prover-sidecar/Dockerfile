@@ -2,10 +2,12 @@
 # This is the correct target: production proving runs server-side on Linux
 # (alongside/within the Nitro enclave service model), never in a browser.
 #
-# Pinned toolchain: rust:1.86 matches the sidecar crate's rust-version and the
-# upstream tlsn v0.1.0-alpha.12 MSRV. The upstream crates are pulled by git tag
+# Pinned toolchain: rust:1.90. The upstream tlsn v0.1.0-alpha.12 dependency tree
+# (mpz rev ccc0057) uses Vec::extract_if, stabilized in Rust 1.87, so the
+# toolchain must be >= 1.87; 1.90 is pinned for headroom. The upstream crates are
+# pulled by git tag
 # (see Cargo.toml); we compile them, we do not author protocol Rust.
-FROM rust:1.86-bookworm AS build
+FROM rust:1.90-bookworm AS build
 WORKDIR /src
 
 # System deps for the crypto crates (ring, openssl-sys style builds).

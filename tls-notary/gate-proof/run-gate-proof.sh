@@ -3,7 +3,7 @@
 # Step 0 gate proof: demonstrate the TLSNotary MPC-TLS pipeline is REAL and
 # notary-learns-nothing, end-to-end, with NO external credentials.
 #
-# Runs entirely inside a pinned rust:1.86 Linux container (the production target
+# Runs entirely inside a pinned rust:1.90 Linux container (the production target
 # is Linux/enclave, not a browser). It:
 #   1. clones the upstream tlsn repo at the SAME tag as the notary-server image
 #      (v0.1.0-alpha.12),
@@ -25,14 +25,21 @@ TAG="${TLSN_TAG:-v0.1.0-alpha.12}"
 cd /work
 
 echo "== [1/5] clone upstream tlsn @ ${TAG} =="
+# Clone only if we don't already have a complete checkout. Do NOT rm a dir that
+# may hold a mounted cache volume; clone fresh into a temp dir and swap it in.
 if [ ! -d tlsn/.git ]; then
-  rm -rf tlsn
-  git clone --depth 1 --branch "$TAG" https://github.com/tlsnotary/tlsn.git
+  rm -rf tlsn.tmp
+  git clone --depth 1 --branch "$TAG" https://github.com/tlsnotary/tlsn.git tlsn.tmp
+  mkdir -p tlsn
+  cp -a tlsn.tmp/. tlsn/
+  rm -rf tlsn.tmp
 fi
 cd tlsn
 
 echo "== [2/5] build notary-server + server-fixture + attestation example =="
-cargo build --release -p notary-server -p tlsn-server-fixture \
+# Example targets live in the tlsn-examples package; scope with -p so cargo finds them.
+cargo build --release -p notary-server -p tlsn-server-fixture
+cargo build --release -p tlsn-examples \
   --example attestation_prove --example attestation_present --example attestation_verify
 
 echo "== [3/5] start notary-server (:7047) and server-fixture =="

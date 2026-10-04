@@ -32,7 +32,7 @@ later removed, the notary + this sidecar still work.
 |---|---|
 | Upstream tlsn crates | git `tag = v0.1.0-alpha.12` (see `Cargo.toml`) |
 | notary-server image | `ghcr.io/tlsnotary/tlsn/notary-server:v0.1.0-alpha.12` |
-| Rust toolchain | `1.86` (see `Dockerfile`, `rust-version` in `Cargo.toml`) |
+| Rust toolchain | `1.90` (>= 1.87 required by mpz `extract_if`; see `Dockerfile`) |
 
 Prover and notary **must** share the same protocol release; alpha.12 is chosen
 to match the published notary-server image.

@@ -157,11 +157,19 @@ cd tls-notary/gate-proof
 
 > Build/execution status at hand-off: the gate harness and sidecar are complete
 > and the pinned toolchain + crate versions are fixed; the notary-server image
-> was pulled and confirmed to boot. The full `cargo build` of the upstream
-> tlsn + mpz crypto tree is a long compile (tens of minutes) and is intended to
-> run on the orchestrator's runner (which also holds the sandbox credentials for
-> the authenticated run). The command above reproduces the end-to-end proof
-> deterministically.
+> was pulled and confirmed to boot. The harness was run far enough to verify it
+> is correct: it clones tlsn at `v0.1.0-alpha.12`, resolves the exact pinned git
+> deps (mpz rev `ccc0057`, tlsn-utils `6168663`, rs-merkle `85f3e82`,
+> ws_stream_wasm), and compiles the real TLS 1.2 + AES-GCM crypto stack (ring,
+> `aes-gcm 0.9.2`, `rustls 0.21.12`, `k256`). Two build issues were found and
+> fixed in the harness: (a) example targets must be scoped with
+> `-p tlsn-examples` (names `attestation_prove|present|verify`); (b) the pinned
+> mpz rev uses `Vec::extract_if`, stabilized in Rust **1.87**, so the toolchain
+> floor is >= 1.87 (pinned to **1.90**). The full `cargo build` of the
+> tlsn + mpz tree is a long compile (tens of minutes) and is intended to run to
+> completion on the orchestrator's runner, which also holds the sandbox
+> credentials for the authenticated HTTP-200 run. The command above reproduces
+> the end-to-end proof deterministically.
 
 ---
 

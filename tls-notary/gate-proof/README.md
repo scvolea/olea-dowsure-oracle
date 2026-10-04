@@ -3,7 +3,7 @@
 One command that proves the TLSNotary MPC-TLS pipeline is **real** and
 **notary-learns-nothing**, end-to-end, with **no external credentials**.
 
-It runs inside a pinned `rust:1.86` Linux container (production target is
+It runs inside a pinned `rust:1.90` Linux container (production target is
 Linux/enclave, not a browser) and:
 
 1. clones upstream `tlsn` at `v0.1.0-alpha.12` (same release as the notary image),
@@ -29,7 +29,7 @@ docker run --rm \
   -v tlsn-target-cache:/work/tlsn/target \
   -v "$PWD/run-gate-proof.sh:/run-gate-proof.sh:ro" \
   -e CARGO_NET_GIT_FETCH_WITH_CLI=true \
-  rust:1.86-bookworm \
+  rust:1.90-bookworm \
   bash -c "apt-get update -qq && apt-get install -y -qq git pkg-config libssl-dev cmake clang >/dev/null && bash /run-gate-proof.sh"
 ```
 

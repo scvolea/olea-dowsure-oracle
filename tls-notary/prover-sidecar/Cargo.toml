@@ -11,7 +11,9 @@
 name = "tlsn-prover-sidecar"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.86"
+# >= 1.87 required: the pinned mpz dep (rev ccc0057) uses Vec::extract_if
+# (stabilized in Rust 1.87). 1.90 pinned for headroom.
+rust-version = "1.90"
 publish = false
 
 [[bin]]
