@@ -53,6 +53,7 @@ public final class EnclaveService {
         binding.put("rawHash", rawHash);
         binding.put("transformedHash", transformedHash);
         binding.put("publicKey", publicKey);
+        binding.put("tlsProofHash", tlsProof.get("proofHash"));
 
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("requestId", request.get("requestId"));

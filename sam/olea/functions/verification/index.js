@@ -92,7 +92,7 @@ async function submitEvidence(body) {
     validateEnvelope(body);
     if (!release.dowsurePublicKeyPem || !verifySignature(release.dowsurePublicKeyPem, envelope, body.submissionSignature)) throw new Error('DOWSURE_SIGNATURE_INVALID');
     verifyEnclaveSignature(body, manifest);
-    verifyNitroAttestation(body.attestationDocument, {...release, attestedPublicKeyBase64: body.attestedPublicKeyBase64}, {requestId: body.requestId, nonce: body.nonce, policyVersion: body.policyVersion, rawHash: body.rawPayloadDigest, transformedHash: body.transformedPayloadDigest, publicKey: body.attestedPublicKeyBase64});
+    verifyNitroAttestation(body.attestationDocument, {...release, attestedPublicKeyBase64: body.attestedPublicKeyBase64}, {requestId: body.requestId, nonce: body.nonce, policyVersion: body.policyVersion, rawHash: body.rawPayloadDigest, transformedHash: body.transformedPayloadDigest, publicKey: body.attestedPublicKeyBase64, tlsProofHash: body.tlsProofHash});
     validateNonceBinding(challenge, body);
     verifyTlsNotaryProof(body.tlsProof, {spApiHost: process.env.SP_API_HOST, rawPayloadDigest: body.rawPayloadDigest, maxAgeSeconds: Number(process.env.TLS_PROOF_MAX_AGE_SECONDS), nonce: challenge.nonce});
   } catch (error) {
