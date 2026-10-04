@@ -260,7 +260,7 @@ def list_transactions(env: Optional[Dict[str, str]] = None) -> Tuple[int, Any]:
 def alicloud_tel_three(mobile: str, name: str, idcard: str, env: Optional[Dict[str, str]] = None) -> Tuple[int, Any]:
     return _call_get(
         "alicloud",
-        "/telThree",
+        "/lundear/telThree",
         extra_params={"mobile": mobile, "name": name, "idcard": idcard},
         env=env,
     )
@@ -274,5 +274,5 @@ def qichacha_check(path: str, params: Optional[Dict[str, str]] = None, env: Opti
 
 # ---- Gutu (1 POST) ----
 
-def gutu_panorama_check(body: Any, path: str = "/panorama/check", env: Optional[Dict[str, str]] = None) -> Tuple[int, Any]:
+def gutu_panorama_check(body: Any, path: str = "/api/v1/judicial/panorama-checks", env: Optional[Dict[str, str]] = None) -> Tuple[int, Any]:
     return _call_post("gutu", path, body, env=env)
