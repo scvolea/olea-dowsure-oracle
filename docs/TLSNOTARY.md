@@ -146,6 +146,36 @@ Manager / KMS). Only PUBLIC key material is ever committed.
 See `tls-notary/notary-server/DEPLOY-ECS-FARGATE.md` for the Fargate target
 detail. This is design/doc, not a live deploy.
 
+### Network and DNS
+
+- **Target host (Amazon SP-API): real public DNS, never customized.** The prover
+  connects to the genuine `sandbox.sellingpartnerapi-na.amazon.com` (prod:
+  `sellingpartnerapi-na.amazon.com`) via normal public resolution. The notarized
+  server name is part of the proof, so the target MUST resolve to the real Amazon
+  edge — rewriting or spoofing its DNS would void the proof's meaning. No custom
+  DNS here.
+- **Notary endpoint: a stable DNS name under `oleainternal.com`** (hosted zone in
+  the Olea **tooling** account), e.g. `notary.oleainternal.com`, pointing at the
+  notary's internal NLB (TCP `:7047`) on ECS Fargate. The prover and verifier
+  reach the notary by this name, but **trust is anchored on the notary's pinned
+  public key, not the DNS name** — the name is only addressing. The TLS listener
+  on the notary can carry an `oleainternal.com` cert for transport, independent of
+  the MPC signing key.
+- **Enclave egress (if the prover ever runs inside Nitro):** the enclave has no
+  direct network; outbound traffic goes over vsock to the parent host, which does
+  DNS resolution and forwards to the real target. In the current design the prover
+  sidecar and the notary are standalone (not in the enclave), so this does not
+  apply to the demo.
+
+### Test framing: Dowsure proving against Olea's infra
+
+The demo and preprod exercise are run **as if Dowsure (the prover) is testing
+against Olea-hosted infrastructure** — i.e. Dowsure drives the MPC-TLS session
+while the **notary runs on Olea's side** (`notary.oleainternal.com`, Olea's key).
+This mirrors the production trust split in section 3 exactly: the prover is
+Dowsure, the independent notary is Olea, so a Dowsure-produced proof is
+trustworthy to Olea because Olea's own notary co-authenticated the session.
+
 ---
 
 ## 5. Nonce binding — Olea challenge nonce vs TLSNotary handshake randomness
