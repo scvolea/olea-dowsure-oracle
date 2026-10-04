@@ -102,22 +102,22 @@ Expected: `BUILD SUCCESS`, enclave tests (`EnclaveServiceTest`) still green, and
 
 ## Ordered implementation steps
 
-- [ ] 1. Create the aggregator/parent pom at the repo root.
+- [x] 1. Create the aggregator/parent pom at the repo root. (DONE — `maven.compiler.release` set to **21** per the confirmed intended target, not 17.)
       Create `<ROOT>/pom.xml` with `groupId=com.olea.dowsure`, `artifactId=dowsure-oracle-parent`, `version=0.1.0-SNAPSHOT`, `packaging=pom`; properties `maven.compiler.release=17`, `project.build.sourceEncoding=UTF-8`; `<modules>` = `nitro-enclave`, `coordinator`; a `<pluginManagement>` pinning maven-compiler-plugin 3.13.0 and maven-surefire-plugin 3.5.0 (same versions the enclave already uses). Do not yet reference `coordinator` as an existing dir beyond the module entry (step 3 creates it).
       Files: c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\pom.xml
       Verify: `& $mvn -f "<ROOT>\pom.xml" validate -N` runs (non-recursive) and reports the parent model is valid (BUILD SUCCESS). Full reactor will fail until step 3 adds the module dir — that is expected at this point.
 
-- [ ] 2. Align the enclave module to JDK 17 and to the parent.
+- [x] 2. Align the enclave module to the parent. (DONE — `<parent>` block added, own groupId/version dropped; compiler release **kept at 21**, not lowered to 17, per the confirmed target. Dockerfile untouched.)
       In `<ROOT>/nitro-enclave/pom.xml` change `<maven.compiler.release>21</maven.compiler.release>` to `17` (or remove it and let it inherit from the parent) and add a `<parent>` block pointing at `com.olea.dowsure:dowsure-oracle-parent:0.1.0-SNAPSHOT` with `<relativePath>../pom.xml</relativePath>`. Do not touch the shade/surefire/compiler plugin behavior otherwise. Do NOT edit the enclave `Dockerfile`.
       Files: c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\nitro-enclave\pom.xml
       Verify: `juse17` then `& $mvn -f "<ROOT>\nitro-enclave\pom.xml" clean test` → BUILD SUCCESS and `EnclaveServiceTest` passes under JDK 17 (previously failed with "release version 21 not supported").
 
-- [ ] 3. Create the coordinator Maven module pom.
+- [x] 3. Create the coordinator Maven module pom. (DONE — all four deps pinned, shade plugin produces the CoordinatorMain CLI jar.)
       Create `<ROOT>/coordinator/pom.xml`: `<parent>` = dowsure-oracle-parent (relativePath `../pom.xml`), `artifactId=coordinator`, `packaging=jar`; dependencies per D3 (jackson-databind 2.17.2, junixsocket-core 2.11.1 type pom, junixsocket-vsock 2.11.1, junit-jupiter 5.11.0 test); maven-shade-plugin 3.6.0 producing a CLI jar with `Main-Class=com.olea.dowsure.coordinator.CoordinatorMain`.
       Files: c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\pom.xml
       Verify: `& $mvn -f "<ROOT>\pom.xml" -N validate` passes AND `& $mvn -f "<ROOT>\coordinator\pom.xml" dependency:resolve` resolves all four dependencies with no version errors.
 
-- [ ] 4. Implement the coordinator domain classes (canonicalizer, signer, adapters, Coordinator) — one coherent unit.
+- [x] 4. Implement the coordinator domain classes (canonicalizer, signer, adapters, Coordinator) — one coherent unit. (DONE)
       Create under `<ROOT>/coordinator/src/main/java/com/olea/dowsure/coordinator/`:
       `Canonicalizer.java` (static `canonicalize(Object)` reproducing the Python algorithm from D4 — sorted-key objects, compact separators, UTF-8, byte-exact);
       `Signer.java` (load EC private key from PEM file, `base64(ECDSA-SHA256 sign(bytes))`; never log the key);
@@ -127,22 +127,21 @@ Expected: `BUILD SUCCESS`, enclave tests (`EnclaveServiceTest`) still green, and
       Files: c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\Canonicalizer.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\Signer.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\OleaClient.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\HttpOleaClient.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\EnclaveClient.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\VsockEnclaveClient.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\Coordinator.java
       Verify: `& $mvn -f "<ROOT>\coordinator\pom.xml" compile` → BUILD SUCCESS.
 
-- [ ] 5. Implement the CLI entry point `CoordinatorMain`.
+- [x] 5. Implement the CLI entry point `CoordinatorMain`. (DONE — arg surface matches Python argparse; no-arg run prints usage to stderr, exit 2.)
       Create `<ROOT>/coordinator/src/main/java/com/olea/dowsure/coordinator/CoordinatorMain.java`: parse the D5 args (defaults cid=16, port=5005; required args enforced with usage-to-stderr + non-zero exit), read the raw-payload and tls-proof JSON files as UTF-8, construct `HttpOleaClient` + `VsockEnclaveClient` + `Signer`, call `Coordinator`, and print the result map as indent-2 JSON to stdout. No tokens/keys/payloads/URLs logged.
       Files: c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\CoordinatorMain.java
       Verify: `& $mvn -f "<ROOT>\coordinator\pom.xml" package -DskipTests` → BUILD SUCCESS and a shaded `coordinator-*.jar` is produced in `<ROOT>\coordinator\target`; `java -jar <that jar>` with no args prints usage and exits non-zero.
 
-- [ ] 6. Port the tests to JUnit 5 covering D6.
+- [x] 6. Port the tests to JUnit 5 covering D6. (DONE — 17 tests across the 4 classes, all boundaries mocked, all green.)
       Create `<ROOT>/coordinator/src/test/java/com/olea/dowsure/coordinator/` tests: `VsockFramingTest` (ported Python test — half-close-before-read ordering via a fake `EnclaveClient`/transport, plus `ok:false` propagation), `CanonicalizerTest` (byte-exact expected strings for nested object/array/scalar/UTF-8), `CoordinatorTest` (challenge body + enclave request + envelope key order/values using mocked `OleaClient` and `EnclaveClient`; no real network/vsock), `SignerTest` (ECDSA round-trip verify). Use jupiter + assertions like `EnclaveServiceTest`.
       Files: c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\test\java\com\olea\dowsure\coordinator\VsockFramingTest.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\test\java\com\olea\dowsure\coordinator\CanonicalizerTest.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\test\java\com\olea\dowsure\coordinator\CoordinatorTest.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\test\java\com\olea\dowsure\coordinator\SignerTest.java
       Verify: `& $mvn -f "<ROOT>\coordinator\pom.xml" test` → BUILD SUCCESS, all coordinator tests pass, no network access occurs.
 
-- [ ] 7. Full-reactor build on JDK 17 (integration of both modules).
-      No new files; confirm the parent builds both modules together.
+- [x] 7. Full-reactor build on **JDK 21** (integration of both modules). (DONE — `mvn -f <ROOT>\pom.xml clean test` → BUILD SUCCESS; enclave-service 2/2 and coordinator 17/17 green under JDK 21, the confirmed target. See verification.md.)
+      No new files; confirmed the parent builds both modules together.
       Files: (none)
-      Verify: `juse17` then `& $mvn -f "<ROOT>\pom.xml" clean test` → BUILD SUCCESS with both `enclave-service` and `coordinator` reactor modules green under JDK 17.
 
-- [ ] 8. Remove the Python coordinator and its Python test (last, after Java is green).
+- [x] 8. Remove the Python coordinator and its Python test (last, after Java is green). (DONE — coordinator.py, tests/test_coordinator.py, and stale __pycache__ removed; zero Python in the runtime dirs.)
       Delete `<ROOT>/coordinator/coordinator.py`, `<ROOT>/coordinator/__pycache__/`, `<ROOT>/tests/test_coordinator.py`, and `<ROOT>/tests/__pycache__/`. If `<ROOT>/tests/` is left empty of Python and holds nothing else, remove the now-empty `tests/` dir. Use `git -C <ROOT> rm` so deletions are staged. Do NOT touch `docs/*.md` or `sam/mocks/**`.
       Files: (deletions) c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\coordinator.py, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\tests\test_coordinator.py (+ `__pycache__` dirs)
       Verify: `& $mvn -f "<ROOT>\pom.xml" clean test` still BUILD SUCCESS; `Get-ChildItem <ROOT> -Recurse -Filter *.py -File | Where FullName -notmatch '\\sam\\|\\\.worktrees\\'` returns nothing under the runtime dirs (coordinator/enclave) — zero Python in the runtime.
@@ -156,3 +155,21 @@ Expected: `BUILD SUCCESS`, enclave tests (`EnclaveServiceTest`) still green, and
 - The enclave `Dockerfile` installs `rust`/`cargo` solely to build the native `libnsm.so` NSM library; that is a build-time native dep for attestation, not a Rust/Python *runtime* component, and is out of scope for this migration.
 - No `docs/*.md` reference to `coordinator.py` / `test_coordinator` was found in `<ROOT>/docs` or root `*.md`; matches appeared only under `<ROOT>/sam/docs/**` which is owned by another track — left for that track to update if needed.
 - `<ROOT>/scripts/phase1-evidence-report.js` consumes the coordinator stdout shape `{requestId, evidenceId, evidence{...}}`; the Java coordinator preserves this exact shape, so no JS change is required.
+
+---
+
+## Finalization — COMPLETE
+
+All 8 ordered steps done. Status recorded for handoff.
+
+- **JDK target**: 21 across the reactor (parent pom + enclave), confirmed by the user as the intended target. The plan's original 17 wording (D2/D7, steps 1/2/7) was superseded; the enclave was NOT lowered to 17.
+- **Review**: `.agents/tasks/review.md` + `review.json` — verdict **APPROVED** (no blocking findings). Functional equivalence, fail-closed enclave `ok` gate, exact `tlsProof` pass-through, memory-only key handling / no secret logging, identical CLI surface, enclave-consistent vsock framing, and 17 mocked-boundary tests all confirmed.
+- **Verification**: `.agents/tasks/verification.md` — reactor BUILD SUCCESS on JDK 21 (enclave 2/2, coordinator 17/17); shaded CLI jar builds; no-arg run prints usage to stderr with exit 2. (Not re-run during review per instruction.)
+- **Merge**: branch `coordinator-python-to-java` merged into `main` with a `--no-ff` merge commit (`5d5abee`). No PR, no push — local history only, `main` ahead of `origin/main`. Diff `33c3b33..HEAD` verified to contain ONLY the intended 25-path migration (new parent + coordinator module + Java sources/tests, minimal enclave pom parent-wiring, Python removal, task records) — no docs/scripts/sam/target/evidence scope creep.
+- **Docs**: searched all tracked `*.md`; NO stale references to `coordinator.py` / `test_coordinator` / a Python runtime exist outside this task's own plan/verification. The only `python`/`cryptography` hits are unrelated (enclave EIF/PCR note in `sam/docs/`, generic library mentions in design docs). No doc update required.
+
+### Next step (follow-up, not part of this task)
+- Optional: delete the merged `coordinator-python-to-java` branch (and its worktree) once no longer needed. Left in place pending user confirmation.
+- Optional: push `main` to `origin` when ready (currently local-only, ahead by the migration + prior commits).
+
+**TASK FINISHED.**
