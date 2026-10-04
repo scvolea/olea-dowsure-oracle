@@ -1,0 +1,34 @@
+# Standalone Olea-hosted TLSNotary notary-server.
+#
+# Runs the PREBUILT upstream image pinned to the SAME protocol release as the
+# prover-sidecar (v0.1.0-alpha.12). This host is SEPARATE from the Nitro EC2
+# instance by design: the notary is an independent trust party, and decoupling
+# it means the notary + prover keep working if Nitro is removed later.
+#
+# The signing private key is mounted READ-ONLY from a gitignored local path
+# (./secrets/notary-signing.key). It is never baked into the image and never
+# committed. In production use the Fargate shape in DEPLOY-ECS-FARGATE.md
+# (Secrets Manager/KMS) instead of a bind mount.
+#
+# Generate a signing keypair ONCE on the notary host (kept out of git):
+#   mkdir -p secrets keys
+#   openssl ecparam -name prime256v1 -genkey -noout -out secrets/notary-signing.key
+#   openssl ec -in secrets/notary-signing.key -pubout -out keys/notary.pub
+# Then publish keys/notary.pub (and its key id) to the Olea verifier trust
+# registry as the pinned anchor.
+
+services:
+  notary-server:
+    image: ghcr.io/tlsnotary/tlsn/notary-server:v0.1.0-alpha.12
+    container_name: olea-notary-server
+    restart: unless-stopped
+    ports:
+      # MPC socket the prover-sidecar dials (notary-host:7047).
+      - "7047:7047"
+    volumes:
+      - ./config.yaml:/root/.notary-server/config/config.yaml:ro
+      # GITIGNORED private signing key — mounted read-only at runtime only.
+      - ./secrets/notary-signing.key:/secrets/notary-signing.key:ro
+      # Committed PUBLIC key (trust anchor) mounted for the server to advertise.
+      - ./keys/notary.pub:/keys/notary.pub:ro
+    command: ["--config-file", "/root/.notary-server/config/config.yaml"]

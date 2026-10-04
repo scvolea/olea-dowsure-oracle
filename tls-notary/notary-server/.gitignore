@@ -1,0 +1,17 @@
+# Notary private key material — NEVER commit. The notary signing keypair is
+# generated/held on the notary host (or Secrets Manager/KMS in Fargate) and
+# mounted at runtime via the path referenced in config.yaml.
+*.key
+notary.key
+notary-signing.key
+*_private.pem
+*-private.pem
+*.private.pem
+private/
+secrets/
+keys/
+
+# The PUBLIC key / key-id is the trust anchor and MAY be committed; it is the
+# only key material that belongs in git. Everything else above is excluded.
+!notary.pub
+!notary-key-id.txt

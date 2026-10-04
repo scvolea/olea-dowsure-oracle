@@ -1,0 +1,39 @@
+PLACEHOLDER — pinned Olea notary PUBLIC key / trust anchor.
+
+This file documents WHERE the notary public key the Olea verifier pins lives.
+The actual value is written here (and/or to notary.pub) ONCE, after the notary
+signing keypair is generated on the notary host. Only PUBLIC key material ever
+belongs in git; the private key is gitignored and mounted at runtime.
+
+What the Olea verifier pins
+---------------------------
+The prover-sidecar proof bundle carries `notary_pub_key_id` (hex of the notary
+verifying key). After normalization (tls-notary/bundle/normalize-bundle.js) this
+becomes the tlsProof field `notaryPubKeyId`. The Olea verifier MUST compare that
+value against the pinned anchor below and REJECT any proof signed by a different
+notary. This is the independent trust anchor: tampering with the notary identity
+fails verification even if everything else checks out.
+
+Where the pin lives
+--------------------
+  * This file:            tls-notary/notary-server/notary-key-id.txt  (the hex key id)
+  * PEM form (optional):  tls-notary/notary-server/notary.pub         (SPKI PEM)
+  * Verifier trust list:  the Olea verifier reads the pinned id from its trust
+                          registry/config (FEAT-002/003 wire the exact lookup);
+                          the value here is the source of truth it is seeded from.
+
+Pinned notary key id (hex)
+--------------------------
+<PENDING — fill with the hex `notary_pub_key_id` emitted by the notary once its
+signing keypair is generated. Example shape only, NOT a real key:
+0399b01d8ba1c0e9f2a7b3c4d5e6f70819283a4b5c6d7e8f90a1b2c3d4e5f6a7b8>
+
+Key algorithm
+-------------
+secp256r1 / P-256 (the sidecar reports this as notary_key_alg -> tlsProof.notaryKeyAlg).
+
+Rotation
+--------
+Rotating the notary key changes this id. On rotation: generate a new keypair on
+the notary host, update this pin AND the verifier trust registry together, and
+redeploy. Proofs under the old key must be re-pinned or rejected per policy.
