@@ -1,0 +1,14 @@
+# Only the redacted fixtures are committed here. Any RAW or CREDENTIALED
+# artifact from a real sidecar / SP-API sandbox run must never be committed:
+# it would carry an x-amz-access-token value, real notary signatures, or PII.
+*
+# Allow the redacted, checked-in evidence set:
+!.gitignore
+!README.md
+!sample-bundle.json
+!e2e-transcript.json
+# Belt-and-braces: block anything that looks raw/credentialed even if named above.
+raw-*
+*-raw.json
+*.token
+*-credentialed.*
