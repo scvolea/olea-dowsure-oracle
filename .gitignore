@@ -1,7 +1,7 @@
 # Binary documents should not be committed; keep the Markdown source instead.
 *.pdf
 
-# Local credentials and secrets - never commit real values
+# Local credentials and secrets - never commit real values (.env.example is the committed template)
 .env
 .env.*
 !.env.example
@@ -9,6 +9,13 @@
 # Build artifacts
 nitro-enclave/target/
 **/*.class
+
+# SAM build output
+.aws-sam/
+
+# Python caches
+__pycache__/
+*.pyc
 
 # Agent worktrees and scratch
 .worktrees/
