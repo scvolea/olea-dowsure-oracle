@@ -31,6 +31,7 @@
 //!                     this against the SP-API sandbox with a real LWA token.
 
 use std::env;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use base64::Engine as _;
@@ -155,10 +156,14 @@ async fn main() -> Result<()> {
         root_store
             .add(&tls_core::key::Certificate(CA_CERT_DER.to_vec()))
             .map_err(|e| anyhow!("add fixture CA: {e:?}"))?;
-        let provider = CryptoProvider {
+        // CryptoProvider is not Clone in alpha.12, but this single-process
+        // sidecar reuses one provider across the prover config, the presentation
+        // builder, and the self-verify step. Share it behind an Arc so each site
+        // gets the SAME provider (identical trust anchors) without cloning.
+        let provider = Arc::new(CryptoProvider {
             cert: WebPkiVerifier::new(root_store, None),
             ..Default::default()
-        };
+        });
         (
             host,
             port,
@@ -177,7 +182,7 @@ async fn main() -> Result<()> {
             args.port,
             host,
             args.path.clone(),
-            CryptoProvider::default(),
+            Arc::new(CryptoProvider::default()),
         )
     };
 
@@ -310,8 +315,7 @@ async fn main() -> Result<()> {
         .build()
         .map_err(|e| anyhow!("build transcript proof: {e:?}"))?;
 
-    let present_provider = crypto_provider.clone();
-    let mut pres_builder = attestation.presentation_builder(&present_provider);
+    let mut pres_builder = attestation.presentation_builder(crypto_provider.as_ref());
     pres_builder
         .identity_proof(secrets.identity_proof())
         .transcript_proof(transcript_proof);
@@ -338,7 +342,7 @@ async fn main() -> Result<()> {
         transcript: verified_transcript,
         ..
     } = verify_presentation
-        .verify(&crypto_provider)
+        .verify(crypto_provider.as_ref())
         .map_err(|e| anyhow!("presentation self-verify failed: {e:?}"))?;
 
     let mut partial = verified_transcript.ok_or_else(|| anyhow!("no transcript revealed"))?;

@@ -16,11 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY Cargo.toml ./
+COPY Cargo.lock ./
 COPY src ./src
 
-# Build the release binary. The git-pinned upstream workspace resolves mpz /
-# tlsn-utils to the exact revs the alpha.12 workspace uses.
-RUN cargo build --release --locked || cargo build --release
+# Build the release binary. STRICT --locked: the committed Cargo.lock pins the
+# whole crypto tree to the alpha.12-compatible RC versions (cipher 0.5.0-rc.0,
+# aes 0.9.0-rc.0, crypto-common 0.2.0-rc.3), so cargo can never re-resolve up to
+# the incompatible 0.5.2/0.9.3 line that caused error[E0308] inside mpz.
+RUN cargo build --release --locked
 RUN cp target/release/tlsn-prover-sidecar /tlsn-prover-sidecar
 
 # ---- Minimal runtime image ----
