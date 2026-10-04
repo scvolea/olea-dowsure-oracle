@@ -1,10 +1,14 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>com.olea.dowsure</groupId>
+  <parent>
+    <groupId>com.olea.dowsure</groupId>
+    <artifactId>dowsure-oracle-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
   <artifactId>enclave-service</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
   <properties>
-    <maven.compiler.release>21</maven.compiler.release>
+    <!-- Inherited maven.compiler.release=21 from the parent; kept at 21 (not lowered). -->
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
   <dependencies>
