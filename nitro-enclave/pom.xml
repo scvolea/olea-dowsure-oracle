@@ -1,14 +1,14 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <parent>
-    <groupId>com.olea.dowsure</groupId>
-    <artifactId>dowsure-oracle-parent</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
-    <relativePath>../pom.xml</relativePath>
-  </parent>
+  <!-- Standalone (no parent): the enclave MUST build independently inside its
+       Docker builder (the Dockerfile copies only pom.xml + src), which is how the
+       Nitro EIF is produced. Coupling it to the aggregator parent broke the
+       in-container build. Java release pinned to 21 locally. -->
+  <groupId>com.olea.dowsure</groupId>
   <artifactId>enclave-service</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
   <properties>
-    <!-- Inherited maven.compiler.release=21 from the parent; kept at 21 (not lowered). -->
+    <maven.compiler.release>21</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
   <dependencies>
