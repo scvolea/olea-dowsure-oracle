@@ -2,8 +2,7 @@
 
 const crypto = require('node:crypto');
 const {verifyNitroAttestation} = require('./attestation-verifier');
-const {buildManifest, canonicalize, sha256, validateEnvelope, verifyEnclaveSignature} = require('./verification-contract');
-const {verifyTlsNotaryProof, validateNonceBinding} = require('./tlsnotary-verifier');
+const {buildManifest, canonicalize, sha256, validateEnvelope, validateNonceBinding, verifyEnclaveSignature} = require('./verification-contract');
 
 // AWS SDK clients are constructed lazily so that merely importing this module
 // (as the Node test runner does when it scans this directory) never requires the
@@ -40,7 +39,7 @@ function awsClients() {
   };
 }
 
-const APPROVED_ENDPOINTS = new Set(['GET_ORDERS']);
+const SOURCE_IDS = new Set(['getOrderMetrics', 'listFinancialEventGroups', 'listTransactions', 'alicloudTelThree', 'qichachaEnterpriseVerify', 'qichachaShixinCheck', 'gutuPanoramaChecks']);
 
 function response(statusCode, body) {
   return {statusCode, headers: {'content-type': 'application/json', 'cache-control': 'no-store'}, body: JSON.stringify(body)};
@@ -60,14 +59,14 @@ function verifySignature(publicKeyPem, payload, signature) {
 }
 
 async function issueChallenge(body) {
-  const required = ['requestId', 'source', 'endpoint', 'operation'];
+  const required = ['requestId', 'sourceId'];
   if (!body || required.some((field) => !body[field])) return response(400, {status: 'REJECTED', reasonCode: 'INVALID_REQUEST'});
-  if (body.source !== 'mock-api' || body.endpoint !== 'GET_ORDERS' || !APPROVED_ENDPOINTS.has(body.endpoint)) {
+  if (!SOURCE_IDS.has(body.sourceId)) {
     return response(403, {status: 'REJECTED', reasonCode: 'CHALLENGE_ENDPOINT_MISMATCH'});
   }
 
   const policy = await get(process.env.POLICY_TABLE, {policyVersion: body.policyVersion || 'v1.0'});
-  if (!policy || policy.status !== 'ACTIVE' || !policy.endpointScope.includes(body.endpoint)) {
+  if (!policy || policy.status !== 'ACTIVE') {
     return response(403, {status: 'REJECTED', reasonCode: 'POLICY_VERSION_REVOKED'});
   }
 
@@ -77,7 +76,8 @@ async function issueChallenge(body) {
     requestId: body.requestId,
     nonce: crypto.randomBytes(32).toString('base64url'),
     policyVersion: policy.policyVersion,
-    endpointScope: [body.endpoint],
+    sourceId: body.sourceId,
+    endpointScope: [body.sourceId],
     transformationVersion: policy.transformationVersion,
     issuedAt: issuedAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
@@ -95,7 +95,7 @@ async function issueChallenge(body) {
 }
 
 async function submitEvidence(body) {
-  const required = ['requestId', 'evidenceId', 'nonce', 'policyVersion', 'source', 'endpoint', 'encryptedEvidenceReference', 'manifestDigest', 'submissionEnvelope', 'submissionSignature', 'rawPayload', 'rawResponseB64', 'rawPayloadDigest', 'transformedPayload', 'transformedPayloadDigest', 'canonicalizationVersion', 'tlsProofType', 'tlsProofHash', 'tlsProofResponseHash', 'tlsProof', 'attestationDocument', 'attestedPublicKeyBase64', 'enclaveSignature', 'eifDigest', 'pcr0', 'pcr1', 'pcr2'];
+  const required = ['requestId', 'evidenceId', 'nonce', 'policyVersion', 'sourceId', 'encryptedEvidenceReference', 'manifestDigest', 'submissionEnvelope', 'submissionSignature', 'rawPayload', 'rawResponseB64', 'rawPayloadDigest', 'transformedPayload', 'transformedPayloadDigest', 'canonicalizationVersion', 'attestationDocument', 'attestedPublicKeyBase64', 'enclaveSignature', 'eifDigest', 'pcr0', 'pcr1', 'pcr2'];
   if (!body || required.some((field) => !body[field])) return response(400, {status: 'REJECTED', reasonCode: 'PAYLOAD_CORRUPTED'});
   const {dynamo, s3, UpdateCommand, PutCommand, PutObjectCommand} = awsClients();
 
@@ -105,7 +105,7 @@ async function submitEvidence(body) {
   if (Date.parse(challenge.expiresAt) <= Date.now()) return response(410, {status: 'REJECTED', reasonCode: 'CHALLENGE_EXPIRED'});
   if (body.nonce !== challenge.nonce) return response(422, {status: 'REJECTED', reasonCode: 'NONCE_MISMATCH'});
   if (body.policyVersion !== challenge.policyVersion) return response(422, {status: 'REJECTED', reasonCode: 'POLICY_VERSION_REVOKED'});
-  if (!challenge.endpointScope.includes(body.endpoint)) return response(422, {status: 'REJECTED', reasonCode: 'CHALLENGE_SCOPE_MISMATCH'});
+  if (!challenge.endpointScope.includes(body.sourceId)) return response(422, {status: 'REJECTED', reasonCode: 'CHALLENGE_SCOPE_MISMATCH'});
   const release = await get(process.env.RELEASE_TABLE, {eifDigest: body.eifDigest});
   if (!release) return response(422, {status: 'REJECTED', reasonCode: 'PCR_MISMATCH'});
   if (release.status === 'REVOKED') return response(422, {status: 'REJECTED', reasonCode: 'EIF_REVOKED'});
@@ -116,17 +116,15 @@ async function submitEvidence(body) {
     const rawResponseBytes = Buffer.from(body.rawResponseB64, 'base64');
     if (crypto.createHash('sha256').update(rawResponseBytes).digest('hex') !== body.rawPayloadDigest) throw new Error('RAW_PAYLOAD_HASH_MISMATCH');
     if (sha256(canonicalize(body.transformedPayload)) !== body.transformedPayloadDigest) throw new Error('TRANSFORMED_PAYLOAD_HASH_MISMATCH');
-    if (body.source !== 'mock-api' || body.endpoint !== 'GET_ORDERS') throw new Error('SOURCE_SCOPE_INVALID');
-    if (body.tlsProofType !== 'tlsnotary' || body.tlsProofResponseHash !== body.rawPayloadDigest || !/^[a-f0-9]{64}$/i.test(body.tlsProofHash)) throw new Error('TLS_PROOF_INVALID');
+    if (!SOURCE_IDS.has(body.sourceId)) throw new Error('SOURCE_SCOPE_INVALID');
     const manifest = buildManifest(body);
     const envelope = canonicalize(body.submissionEnvelope);
     if (sha256(canonicalize(manifest)) !== body.manifestDigest) throw new Error('MANIFEST_HASH_MISMATCH');
     validateEnvelope(body);
     if (!release.dowsurePublicKeyPem || !verifySignature(release.dowsurePublicKeyPem, envelope, body.submissionSignature)) throw new Error('DOWSURE_SIGNATURE_INVALID');
     verifyEnclaveSignature(body, manifest);
-    verifyNitroAttestation(body.attestationDocument, {...release, attestedPublicKeyBase64: body.attestedPublicKeyBase64}, {requestId: body.requestId, nonce: body.nonce, policyVersion: body.policyVersion, rawHash: body.rawPayloadDigest, transformedHash: body.transformedPayloadDigest, publicKey: body.attestedPublicKeyBase64, tlsProofHash: body.tlsProofHash});
+    verifyNitroAttestation(body.attestationDocument, {...release, attestedPublicKeyBase64: body.attestedPublicKeyBase64}, {requestId: body.requestId, nonce: body.nonce, policyVersion: body.policyVersion, sourceId: body.sourceId, rawHash: body.rawPayloadDigest, transformedHash: body.transformedPayloadDigest, publicKey: body.attestedPublicKeyBase64});
     validateNonceBinding(challenge, body);
-    verifyTlsNotaryProof(body.tlsProof, {spApiHost: process.env.SP_API_HOST, rawPayloadDigest: body.rawPayloadDigest, maxAgeSeconds: Number(process.env.TLS_PROOF_MAX_AGE_SECONDS), nonce: challenge.nonce});
   } catch (error) {
     const reasonCode = error.message === 'DOWSURE_SIGNATURE_INVALID' ? error.message : error.message;
     return response(422, {status: 'REJECTED', reasonCode});

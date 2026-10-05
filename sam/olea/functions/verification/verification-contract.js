@@ -34,18 +34,25 @@ function validateTlsProof(proof, rawHash) {
   if (proof.responseHash !== rawHash) throw new Error('TLS_PROOF_HASH_MISMATCH');
 }
 
+// tlsProof-free nonce binding: ties the challenge-issued nonce to the submission
+// body nonce and enforces single-use + expiry. Replaces the notary-coupled check
+// that previously lived in tlsnotary-verifier.js on the live path.
+function validateNonceBinding(challenge, body, now = Date.now()) {
+  if (!challenge) throw new Error('CHALLENGE_NOT_FOUND');
+  if (challenge.used) throw new Error('CHALLENGE_REPLAY');
+  if (Date.parse(challenge.expiresAt) <= now) throw new Error('CHALLENGE_EXPIRED');
+  if (challenge.nonce !== body.nonce) throw new Error('NONCE_MISMATCH');
+}
+
 function buildManifest(body) {
   return {
     requestId: body.requestId,
     evidenceId: body.evidenceId,
-    source: body.source,
-    endpoint: body.endpoint,
+    sourceId: body.sourceId,
     nonce: body.nonce,
     policyVersion: body.policyVersion,
     rawSourceHash: body.rawPayloadDigest,
     transformedHash: body.transformedPayloadDigest,
-    tlsProofType: body.tlsProofType,
-    tlsProofHash: body.tlsProofHash,
     canonicalizationVersion: body.canonicalizationVersion,
     attestedPublicKeyBase64: body.attestedPublicKeyBase64,
   };
@@ -69,4 +76,4 @@ function verifyEnclaveSignature(body, manifest) {
   if (!crypto.verify('sha256', Buffer.from(canonicalize(manifest)), key, Buffer.from(body.enclaveSignature, 'base64'))) throw new Error('ENCLAVE_SIGNATURE_INVALID');
 }
 
-module.exports = {canonicalize, sha256, validateChallengeState, validateTlsProof, buildManifest, validateEnvelope, verifyEnclaveSignature};
+module.exports = {canonicalize, sha256, validateChallengeState, validateTlsProof, validateNonceBinding, buildManifest, validateEnvelope, verifyEnclaveSignature};

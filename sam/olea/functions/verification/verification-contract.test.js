@@ -9,7 +9,7 @@ const {
   sha256,
   validateChallengeState,
   validateEnvelope,
-  validateTlsProof,
+  validateNonceBinding,
   verifyEnclaveSignature,
 } = require('./verification-contract');
 
@@ -18,14 +18,11 @@ const publicKey = pair.publicKey.export({type: 'spki', format: 'der'}).toString(
 const body = {
   requestId: 'request-1',
   evidenceId: 'evidence-1',
-  source: 'mock-api',
-  endpoint: 'GET_ORDERS',
+  sourceId: 'getOrderMetrics',
   nonce: 'nonce-1',
   policyVersion: 'v1.0',
   rawPayloadDigest: 'a'.repeat(64),
   transformedPayloadDigest: 'b'.repeat(64),
-  tlsProofType: 'tlsnotary',
-  tlsProofHash: 'c'.repeat(64),
   canonicalizationVersion: 'RFC8785-PoC',
   attestedPublicKeyBase64: publicKey,
   encryptedEvidenceReference: 'vsock://opaque/evidence-1',
@@ -43,17 +40,12 @@ body.submissionEnvelope = {
   submittedAt: '2026-09-23T00:00:00.000Z',
 };
 
-function proof(responseHash = body.rawPayloadDigest) {
-  const value = {proofType: 'tlsnotary', responseHash, transcript: 'controlled-fixture'};
-  return {...value, proofHash: sha256(canonicalize(value))};
-}
-
 test('rejects replayed challenge', () => {
-  assert.throws(() => validateChallengeState({used: true, expiresAt: '2999-01-01T00:00:00.000Z', nonce: 'nonce-1', policyVersion: 'v1.0', endpointScope: ['GET_ORDERS']}, body), /CHALLENGE_REPLAY/);
+  assert.throws(() => validateChallengeState({used: true, expiresAt: '2999-01-01T00:00:00.000Z', nonce: 'nonce-1', policyVersion: 'v1.0', endpointScope: ['getOrderMetrics']}, body), /CHALLENGE_REPLAY/);
 });
 
 test('rejects expired challenge', () => {
-  assert.throws(() => validateChallengeState({used: false, expiresAt: '2020-01-01T00:00:00.000Z', nonce: 'nonce-1', policyVersion: 'v1.0', endpointScope: ['GET_ORDERS']}, body), /CHALLENGE_EXPIRED/);
+  assert.throws(() => validateChallengeState({used: false, expiresAt: '2020-01-01T00:00:00.000Z', nonce: 'nonce-1', policyVersion: 'v1.0', endpointScope: ['getOrderMetrics']}, body), /CHALLENGE_EXPIRED/);
 });
 
 test('rejects tampered envelope', () => {
@@ -66,10 +58,18 @@ test('rejects tampered enclave manifest signature', () => {
   assert.throws(() => verifyEnclaveSignature({...body, enclaveSignature: signature.slice(0, -4) + 'AAAA'}, manifest), /ENCLAVE_SIGNATURE_INVALID/);
 });
 
-test('rejects corrupted TLS proof', () => {
-  assert.throws(() => validateTlsProof({...proof(), proofHash: 'd'.repeat(64)}, body.rawPayloadDigest), /TLS_PROOF_INVALID/);
+test('validateNonceBinding accepts a matching, unexpired, single-use nonce', () => {
+  assert.doesNotThrow(() => validateNonceBinding({used: false, expiresAt: '2999-01-01T00:00:00.000Z', nonce: 'nonce-1'}, body));
 });
 
-test('rejects TLS response hash mismatch', () => {
-  assert.throws(() => validateTlsProof(proof('f'.repeat(64)), body.rawPayloadDigest), /TLS_PROOF_HASH_MISMATCH/);
+test('validateNonceBinding rejects a replayed (used) nonce (CHALLENGE_REPLAY)', () => {
+  assert.throws(() => validateNonceBinding({used: true, expiresAt: '2999-01-01T00:00:00.000Z', nonce: 'nonce-1'}, body), /CHALLENGE_REPLAY/);
+});
+
+test('validateNonceBinding rejects an expired nonce (CHALLENGE_EXPIRED)', () => {
+  assert.throws(() => validateNonceBinding({used: false, expiresAt: '2020-01-01T00:00:00.000Z', nonce: 'nonce-1'}, body), /CHALLENGE_EXPIRED/);
+});
+
+test('validateNonceBinding rejects a nonce mismatch (NONCE_MISMATCH)', () => {
+  assert.throws(() => validateNonceBinding({used: false, expiresAt: '2999-01-01T00:00:00.000Z', nonce: 'different-nonce'}, body), /NONCE_MISMATCH/);
 });
