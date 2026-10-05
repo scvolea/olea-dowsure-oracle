@@ -29,7 +29,7 @@ public final class EnclaveService {
     }
 
     public Map<String, Object> acquire(Map<String, Object> request) {
-        require(request, "requestId", "nonce", "policyVersion", "evidenceId", "eifDigest", "rawPayload", "tlsProof");
+        require(request, "requestId", "nonce", "policyVersion", "evidenceId", "eifDigest", "rawPayload", "rawResponseB64", "tlsProof");
         if (!SOURCE.equals(request.get("source")) || !ENDPOINT.equals(request.get("endpoint"))) throw new IllegalArgumentException("SOURCE_SCOPE_INVALID");
 
         Map<String, Object> rawPayload = map(request.get("rawPayload"), "rawPayload");
@@ -39,7 +39,8 @@ public final class EnclaveService {
         proofMaterial.remove("proofHash");
         if (!sha256(canonical(proofMaterial)).equals(tlsProof.get("proofHash"))) throw new IllegalArgumentException("TLS_PROOF_INVALID");
 
-        String rawHash = sha256(canonical(rawPayload));
+        byte[] rawResponseBytes = Base64.getDecoder().decode((String) request.get("rawResponseB64"));
+        String rawHash = sha256Bytes(rawResponseBytes);
         if (!rawHash.equals(tlsProof.get("responseHash"))) throw new IllegalArgumentException("TLS_PROOF_HASH_MISMATCH");
         Map<String, Object> transformed = transform(rawPayload);
         String transformedHash = sha256(canonical(transformed));
@@ -130,8 +131,12 @@ public final class EnclaveService {
     }
 
     String sha256(String value) {
+        return sha256Bytes(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    String sha256Bytes(byte[] bytes) {
         try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
         } catch (Exception error) {
             throw new IllegalStateException(error);
         }

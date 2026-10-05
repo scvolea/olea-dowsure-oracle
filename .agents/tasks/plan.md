@@ -1,175 +1,194 @@
-# Implementation Plan — Migrate dowsure-oracle coordinator from Python to Java
+# Implementation Plan — bind TLSNotary proof and Nitro attestation to the SAME response bytes
 
-Goal: rewrite `coordinator/coordinator.py` as a Java CLI that is functionally equivalent, compiles, and is covered by JUnit tests matching the enclave module's setup; then delete the Python coordinator and its Python test. End state: coordinator + enclave both Java, verifier + scripts JS, zero Python in the runtime.
+## Goal
 
-All paths below are absolute under the worktree root
-`c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java` (abbreviated `<ROOT>` in prose; checkbox items use full paths). Use `git -C <ROOT>` for any git ops.
+Make the TLSNotary proof and the Nitro enclave attestation bind to the SAME bytes — the exact
+HTTP response bytes Amazon's SP-API sandbox sent on the wire. Path A1: both the enclave and the
+Olea verifier hash the actual notarized response bytes (base64 `rawResponseB64`), and the Rust
+sidecar additionally emits those exact bytes as base64 so a consumer can reproduce the hash.
 
----
+## Scope (surgical — these files only)
 
-## Design decisions (made here, not deferred)
+Three production files + their tests, all under
+`c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\bind-response-bytes`:
 
-### D1 — Module placement: a NEW top-level `coordinator/` Maven module under a NEW aggregator/parent pom at the repo root
+1. `tls-notary/prover-sidecar/src/main.rs` (Rust — ONE struct field + ONE assignment)
+2. `nitro-enclave/src/main/java/com/olea/dowsure/enclave/EnclaveService.java` + its test
+   `nitro-enclave/src/test/java/com/olea/dowsure/enclave/EnclaveServiceTest.java`
+3. `sam/olea/functions/verification/index.js` (`submitEvidence`) — no JS test currently exercises
+   `submitEvidence`, so a focused test is ADDED (see item 6)
 
-Observed facts (verified by reading the tree and building):
-- There is **no** root `pom.xml`, **no** `.mvn/`, and **no** Maven wrapper (`mvnw`/`mvnw.cmd`) anywhere in the worktree. The only Maven project is the single standalone module `<ROOT>/nitro-enclave/pom.xml` (groupId `com.olea.dowsure`, artifactId `enclave-service`, version `0.1.0-SNAPSHOT`).
-- The enclave is self-contained Java; the coordinator shares its JSON canonicalization approach (Jackson), its vsock transport (junixsocket-vsock), and its JUnit 5 (jupiter) test style (see `EnclaveServiceTest`).
+Do NOT reformat unrelated code. Java + JS for our code; Rust is limited to the existing sidecar.
 
-Decision: create `<ROOT>/coordinator/` as its own Maven module (`artifactId=coordinator`, same `groupId=com.olea.dowsure`, `version=0.1.0-SNAPSHOT`) and create a NEW aggregator/parent pom at `<ROOT>/pom.xml` (`artifactId=dowsure-oracle-parent`, `packaging=pom`) that:
-- declares shared properties `maven.compiler.release=17` and `project.build.sourceEncoding=UTF-8`,
-- declares `<modules>` listing `nitro-enclave` and `coordinator`,
-- centralizes plugin/dependency versions via `<pluginManagement>`/`<dependencyManagement>` where it reduces drift.
+## Verified facts from exploration (ground truth)
 
-Reasoning: a package inside `nitro-enclave` is rejected because that module's artifact is a shaded enclave jar whose manifest `Main-Class` is `EnclaveMain`; folding a second CLI main class and the coordinator's extra dependencies into the enclave's shaded jar is wrong packaging and pollutes the enclave image. A sibling module keeps the enclave jar clean, gives the coordinator its own CLI/shaded jar, and the aggregator lets a single `mvn test` build both modules on JDK 17. The Python coordinator was already a separate top-level `coordinator/` directory, so a top-level Maven module preserves the repo's existing shape.
+- Sidecar `main.rs`: `ProofBundle` struct is defined around lines 115-130; it serializes with
+  `#[derive(serde::Serialize)]` so field names map to snake_case JSON. The revealed recv slice is
+  already computed as `let recv_bytes_revealed = &partial.received_unsafe()[..recv_end];` immediately
+  before `let response_hash = sha256_hex(recv_bytes_revealed);`. The bundle literal (the
+  `let bundle = ProofBundle { ... }` block) uses
+  `base64::engine::general_purpose::STANDARD.encode(&attestation_bytes)` for `attestation_b64` /
+  `presentation_b64`. `base64::Engine as _` is already imported at the top.
+- Enclave `EnclaveService.java`: `acquire` currently calls
+  `require(request, "requestId", "nonce", "policyVersion", "evidenceId", "eifDigest", "rawPayload", "tlsProof");`
+  then `String rawHash = sha256(canonical(rawPayload));` and
+  `if (!rawHash.equals(tlsProof.get("responseHash"))) throw new IllegalArgumentException("TLS_PROOF_HASH_MISMATCH");`.
+  Helpers present: `String sha256(String value)` (UTF-8 -> SHA-256 hex via `HexFormat`/`MessageDigest`),
+  `String canonical(Object value)`. `java.util.Base64` and `java.security.MessageDigest`,
+  `java.util.HexFormat`, `java.nio.charset.StandardCharsets` are already imported. `rawPayload` (parsed
+  JSON map) is used by `transform(rawPayload)` and stored via `evidence.put("rawPayload", rawPayload)`.
+  `evidence.put("rawPayloadDigest", rawHash)` and `evidence.put("tlsProofResponseHash", rawHash)` both
+  use `rawHash`. The attestation user_data binding map keys are
+  `{requestId, nonce, policyVersion, rawHash, transformedHash, publicKey, tlsProofHash}`.
+- Enclave test `EnclaveServiceTest.java`: three tests. Each builds `raw` (a parsed JSON map),
+  derives `rawHash = service.sha256(service.canonical(raw))`, sets `proof.responseHash = rawHash`, and
+  builds `request` with `rawPayload=raw` and `tlsProof=proof`. Because today's enclave hashes
+  `canonical(rawPayload)`, these pass; after the change the enclave hashes decoded `rawResponseB64`, so
+  each request must carry a `rawResponseB64` whose decoded bytes hash to the proof's `responseHash`.
+- Verifier `index.js` `submitEvidence`: `required` array lists all current fields (no `rawResponseB64`).
+  Current digest check: `if (sha256(canonicalize(body.rawPayload)) !== body.rawPayloadDigest) throw new Error('RAW_PAYLOAD_HASH_MISMATCH');`
+  The transformed check (`sha256(canonicalize(body.transformedPayload)) !== body.transformedPayloadDigest`)
+  and `body.tlsProofResponseHash !== body.rawPayloadDigest` stay. `crypto` is already required
+  (`const crypto = require('node:crypto');`). `sha256`/`canonicalize` come from `verification-contract.js`.
+- `verification-contract.js`: `sha256(value)` = `crypto.createHash('sha256').update(value).digest('hex')`
+  — it accepts a Buffer directly, so `sha256(rawResponseBytes)` also works; the plan uses the explicit
+  `crypto.createHash` form from the task for clarity. `buildManifest(body)` reads `rawPayloadDigest`
+  (unchanged — no edit needed).
 
-Scope note: the Python code currently lives directly at `<ROOT>/coordinator/coordinator.py`. The Java module needs standard Maven layout (`<ROOT>/coordinator/src/main/java/...`), so the Java sources are added alongside, and `coordinator.py` is deleted in the final step — no path collision because `.py` and `src/` coexist until the delete.
+## Build / test environment (verified)
 
-### D2 — JDK level: pin everything to release 17
+- There is NO Maven wrapper (`mvnw.cmd`) in the worktree or repo. The enclave build therefore uses the
+  system `mvn` (present on PATH) and MUST run under JDK 21. Default `java` on PATH is 17; the parent pom
+  sets `maven.compiler.release=21`. Switch to JDK 21 first with the steering alias `juse21` (JDK 21 is at
+  `%USERPROFILE%\scoop\apps\temurin21-jdk\current`). The task text references `& .\mvnw.cmd`; since no
+  wrapper exists, the equivalent command is `mvn` with JDK 21 active (see item 4 verify).
+- No Rust toolchain (`cargo`) is on PATH, so the sidecar change is verified by MANUAL REVIEW against the
+  stated invariant, not `cargo build`. If a Rust toolchain becomes available, run `cargo build` in
+  `tls-notary/prover-sidecar/`.
+- `node` (v24) is present. The verification dir has no `package.json`/`node_modules`; tests run via the
+  built-in runner `node --test`, which auto-discovers `*.test.js`. The verifier module requires the AWS
+  SDK lazily, so importing it for tests needs no `node_modules`.
+- Windows PowerShell: use `;` not `&&`; no `head`/`tail`.
 
-Verified: `<ROOT>/nitro-enclave/pom.xml` sets `maven.compiler.release=21`, and compiling it under JDK 17 fails with `release version 21 not supported`. Overriding to `-Dmaven.compiler.release=17` compiles AND test-compiles the enclave cleanly under JDK 17 (confirmed by running Maven; the enclave uses only `var`, `instanceof` type patterns, `HexFormat`, `Map.of`, `TreeMap` — all Java 17). The repo standard is JDK 17 (task constraint: do NOT require JDK 21).
+## Cross-component invariants (must hold after the change — document, do not weaken)
 
-Decision: set `maven.compiler.release=17` in the new parent pom and **change `<ROOT>/nitro-enclave/pom.xml` from 21 to 17** so the enclave inherits/aligns and the whole reactor builds on JDK 17. The enclave `Dockerfile` still installs Java 21 Corretto to produce the runtime image — release-17 bytecode runs on a 21 JVM, so the Docker build is unaffected (and the Dockerfile is not edited; it is owned by the enclave track).
+1. Sidecar: `sha256(base64_decode(revealed_recv_b64)) == response_hash`.
+2. Enclave: `rawHash == sha256(base64_decode(rawResponseB64))` AND `rawHash == tlsProof.responseHash`.
+3. Verifier: `sha256(base64_decode(rawResponseB64)) == rawPayloadDigest == tlsProofResponseHash`.
+4. Attestation user_data binding `{requestId, nonce, policyVersion, rawHash, transformedHash, publicKey,
+   tlsProofHash}` canonical-JSON-encoded is UNCHANGED (only the SOURCE of `rawHash` changes).
+5. No secrets/tokens/payloads/PII added to any log.
 
-### D3 — Dependencies (pinned, with justification)
+## Boundary / assumption (out of scope, note only)
 
-The coordinator module pom declares exactly:
-- `com.fasterxml.jackson.core:jackson-databind:2.17.2` — JSON parse/serialize and canonical ordering, SAME version the enclave already uses (no new version in the reactor). Justification: parity with enclave's canonicalization and DTO handling.
-- `com.kohlschutter.junixsocket:junixsocket-core:2.11.1` (type `pom`) and `com.kohlschutter.junixsocket:junixsocket-vsock:2.11.1` — AF_VSOCK client, SAME library/version the enclave's `VsockServer` uses. Justification: the task says prefer reusing the enclave's vsock stack; using junixsocket's `AFVSOCKSocketAddress` client matches the server's framing exactly.
-- `org.junit.jupiter:junit-jupiter:5.11.0` (scope `test`) — SAME JUnit as the enclave test.
-
-No new/unpinned dependency is introduced. ECDSA signing and SHA-256 use the JDK's built-in `java.security` (`Signature "SHA256withECDSA"`, `KeyFactory`/PEM parsing) — this replaces the Python `cryptography` library with the standard library, mirroring how `EnclaveService` already signs with `Signature.getInstance("SHA256withECDSA")`.
-
-### D4 — Behavior to preserve EXACTLY (from `coordinator.py`, verified by reading it)
-
-The Java coordinator must reproduce this flow and these invariants:
-1. Generate `requestId` and `evidenceId` as random UUIDs (`java.util.UUID.randomUUID()`).
-2. `POST <olea-url>/v1/challenges` with body `{requestId, source:"mock-api", endpoint:"GET_ORDERS", operation:"GET_ORDERS", policyVersion:"v1.0"}`, `Content-Type: application/json`, 30s timeout; parse JSON response (the `challenge`, which carries `nonce` and `policyVersion`).
-3. Read `--raw-payload-file` and `--tls-proof-file` as UTF-8 JSON into generic maps.
-4. vsock-connect to `(cid, port)`, send the request JSON, **half-close the write side before reading** (Python does `socket.shutdown(SHUT_WR)` — the one behavior its Python test asserts), read the full response, parse it; if `ok` is false, raise with `error` (default `ENCLAVE_FAILED`); else return `evidence`. The enclave request map is EXACTLY: `{requestId, source:"mock-api", endpoint:"GET_ORDERS", nonce (from challenge), policyVersion (from challenge), rawPayload, tlsProof, evidenceId, eifDigest}`.
-5. Build the submission envelope map in this key order: `{requestId, nonce, policyVersion, evidenceId, manifestDigest (from evidence), encryptedEvidenceReference (from evidence), submittedAt (ISO-8601 UTC now)}`.
-6. Attach `evidence["submissionEnvelope"] = envelope` and `evidence["submissionSignature"] = base64( ECDSA-SHA256 sign( canonicalize(envelope) ) )` using the EC private key from `--dowsure-private-key-file`.
-7. Print to stdout `{"requestId", "evidenceId", "challenge", "evidence"}` as pretty JSON (indent 2). This exact top-level shape is consumed by `<ROOT>/scripts/phase1-evidence-report.js` (reads `result.evidence` / `result.requestId` / `result.evidenceId`), so it must be preserved.
-
-Canonicalization must match the Python `canonicalize`: scalars/null via compact JSON; arrays as `[` + comma-joined canonical items + `]`; objects as `{` + comma-joined `"key":value` with **keys sorted** and compact separators (`,`/`:`), no spaces, `ensure_ascii=false` (UTF-8). This produces the exact bytes the Dowsure signature is computed over, so it must be byte-identical to the Python output.
-
-STRICT invariants to keep: never log or persist the LWA/ephemeral token, raw payloads, PII, private keys, or full presigned URLs (the Python code holds the private key only in-memory while signing and never prints it — preserve that). Preserve the `tlsProof` → enclave `tlsProof` field pass-through EXACTLY (opaque pass-through; do not inspect, reshape, or validate it in the coordinator — the enclave validates it). Keep the Olea HTTP call and any future cloud/vendor calls behind a small typed adapter interface so tests can mock them without real network.
-
-### D5 — CLI argument surface (identical to Python `argparse`)
-
-Main class `com.olea.dowsure.coordinator.CoordinatorMain` accepts:
-- `--olea-url` (required)
-- `--enclave-cid` (int, default `16`)
-- `--enclave-port` (int, default `5005`)
-- `--raw-payload-file` (required)
-- `--tls-proof-file` (required)
-- `--dowsure-private-key-file` (required)
-- `--eif-digest` (required)
-
-(`requestId`/`evidenceId` are generated, not args — matches Python.) Unknown/missing required args exit non-zero with a usage message to stderr.
-
-### D6 — Test plan
-
-Port `<ROOT>/tests/test_coordinator.py` to JUnit 5 (jupiter), matching `EnclaveServiceTest` style, under `<ROOT>/coordinator/src/test/java/com/olea/dowsure/coordinator/`. Mock all network/vsock boundaries — no real sockets, no real HTTP. Cover:
-- The ported Python assertion: vsock invoke **half-closes the write side before reading** and returns `evidence` on `ok:true` (inject a fake transport; assert ordering: shutdown-write happens before read).
-- vsock `ok:false` → throws with the enclave `error` (and default `ENCLAVE_FAILED`).
-- Canonicalization: byte-exact output for nested object (sorted keys), array, scalars, and UTF-8 string — pin against known expected strings taken from the Python algorithm.
-- Envelope creation: correct keys/order and values wired from challenge + evidence + evidenceId.
-- Signature: sign a canonical envelope with a test EC key and verify the signature verifies with the matching public key (round-trip), proving ECDSA-SHA256 over canonical bytes.
-- Challenge request builder: produces the exact body map `{requestId, source, endpoint, operation, policyVersion}` and targets `<olea-url>/v1/challenges` (assert via a mocked HTTP adapter; no real call).
-- Fail-closed surface: missing enclave `ok`, enclave error propagation. (Deeper challenge-field validation — expiry/scope — lives in the enclave/Olea per the current code; the coordinator's fail-closed point is the enclave `ok` check and required-arg enforcement, so test those.)
-
-To make the above unit-testable, structure the coordinator as: a `CoordinatorMain` (arg parsing + wiring + stdout) delegating to a `Coordinator` class with injected `OleaClient` (HTTP adapter interface), `EnclaveClient` (vsock adapter interface), and a `Signer`/canonicalizer helper — mirroring how `EnclaveService` takes an injected `AttestationProvider` so tests pass fakes.
-
-### D7 — Verify plan
-
-There is no Maven wrapper in the repo, so builds use the repo's pinned Maven (scoop Maven 3.9.16 at `%USERPROFILE%\scoop\apps\maven\current\bin\mvn.cmd`) with JAVA_HOME pointed at JDK 17. Canonical commands (PowerShell), run from `<ROOT>`:
-
-```powershell
-# Align JAVA_HOME to JDK 17 and use the pinned Maven (no wrapper exists)
-juse17   # or: $env:JAVA_HOME="C:\Program Files\Java\jdk-17"; $env:Path="$env:JAVA_HOME\bin;"+$env:Path
-$mvn = "$env:USERPROFILE\scoop\apps\maven\current\bin\mvn.cmd"
-
-# Build + test the whole reactor (parent builds nitro-enclave AND coordinator) on JDK 17
-& $mvn -f "c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\pom.xml" clean test
-
-# Coordinator module only (faster inner loop)
-& $mvn -f "c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\pom.xml" test
-```
-
-Expected: `BUILD SUCCESS`, enclave tests (`EnclaveServiceTest`) still green, and all new coordinator JUnit tests pass. If a dotted `-D` property is needed, pass it via an argument array (PowerShell gotcha), e.g. `$a=@('-Dmaven.compiler.release=17','test'); & $mvn @a`.
+The producers that POPULATE `rawResponseB64` (the coordinator that builds the enclave request, and
+whatever assembles the verifier evidence body — e.g. `scripts/tlsnotary-e2e-demo.js`,
+`tls-notary/bundle/normalize-bundle.js`) are OUT OF SCOPE for this change per the explicit constraint
+"only the three files + their tests." This change makes the enclave and verifier REQUIRE and CONSUME
+`rawResponseB64`; wiring the producers to send `base64(revealed recv bytes)` is a separate follow-up.
+The tests added/updated here supply `rawResponseB64` directly so the three components are verifiable in
+isolation. Flag this boundary in the implementation summary.
 
 ---
 
-## Ordered implementation steps
+## Steps
 
-- [x] 1. Create the aggregator/parent pom at the repo root. (DONE — `maven.compiler.release` set to **21** per the confirmed intended target, not 17.)
-      Create `<ROOT>/pom.xml` with `groupId=com.olea.dowsure`, `artifactId=dowsure-oracle-parent`, `version=0.1.0-SNAPSHOT`, `packaging=pom`; properties `maven.compiler.release=17`, `project.build.sourceEncoding=UTF-8`; `<modules>` = `nitro-enclave`, `coordinator`; a `<pluginManagement>` pinning maven-compiler-plugin 3.13.0 and maven-surefire-plugin 3.5.0 (same versions the enclave already uses). Do not yet reference `coordinator` as an existing dir beyond the module entry (step 3 creates it).
-      Files: c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\pom.xml
-      Verify: `& $mvn -f "<ROOT>\pom.xml" validate -N` runs (non-recursive) and reports the parent model is valid (BUILD SUCCESS). Full reactor will fail until step 3 adds the module dir — that is expected at this point.
+- [ ] 1. Sidecar: add `revealed_recv_b64` to the `ProofBundle` struct.
+      In `tls-notary/prover-sidecar/src/main.rs`, add one field to the `#[derive(serde::Serialize)]
+      struct ProofBundle` (around lines 115-130). Place it next to `revealed_recv_preview`:
+      `revealed_recv_b64: String,`. Make no other struct change; keep `revealed_recv_preview`.
+      Files: `tls-notary/prover-sidecar/src/main.rs`
+      Verify: visual — the struct now has `revealed_recv_b64: String` and still has
+      `revealed_recv_preview: String`.
 
-- [x] 2. Align the enclave module to the parent. (DONE — `<parent>` block added, own groupId/version dropped; compiler release **kept at 21**, not lowered to 17, per the confirmed target. Dockerfile untouched.)
-      In `<ROOT>/nitro-enclave/pom.xml` change `<maven.compiler.release>21</maven.compiler.release>` to `17` (or remove it and let it inherit from the parent) and add a `<parent>` block pointing at `com.olea.dowsure:dowsure-oracle-parent:0.1.0-SNAPSHOT` with `<relativePath>../pom.xml</relativePath>`. Do not touch the shade/surefire/compiler plugin behavior otherwise. Do NOT edit the enclave `Dockerfile`.
-      Files: c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\nitro-enclave\pom.xml
-      Verify: `juse17` then `& $mvn -f "<ROOT>\nitro-enclave\pom.xml" clean test` → BUILD SUCCESS and `EnclaveServiceTest` passes under JDK 17 (previously failed with "release version 21 not supported").
+- [ ] 2. Sidecar: populate `revealed_recv_b64` in the bundle literal.
+      In the `let bundle = ProofBundle { ... }` initializer, add
+      `revealed_recv_b64: base64::engine::general_purpose::STANDARD.encode(recv_bytes_revealed),`
+      (reuse the exact `recv_bytes_revealed` slice already used for `response_hash`; same STANDARD
+      engine as `attestation_b64`/`presentation_b64`). Do NOT change the committed/revealed ranges or
+      how `response_hash` is computed. Keep `revealed_recv_preview` assignment unchanged.
+      Files: `tls-notary/prover-sidecar/src/main.rs`
+      Verify: with no `cargo` on PATH, MANUAL REVIEW confirming the invariant
+      `sha256(base64_decode(revealed_recv_b64)) == response_hash` holds because both derive from the
+      same `recv_bytes_revealed` slice. If a Rust toolchain is available: `cargo build` in
+      `tls-notary/prover-sidecar/` succeeds.
 
-- [x] 3. Create the coordinator Maven module pom. (DONE — all four deps pinned, shade plugin produces the CoordinatorMain CLI jar.)
-      Create `<ROOT>/coordinator/pom.xml`: `<parent>` = dowsure-oracle-parent (relativePath `../pom.xml`), `artifactId=coordinator`, `packaging=jar`; dependencies per D3 (jackson-databind 2.17.2, junixsocket-core 2.11.1 type pom, junixsocket-vsock 2.11.1, junit-jupiter 5.11.0 test); maven-shade-plugin 3.6.0 producing a CLI jar with `Main-Class=com.olea.dowsure.coordinator.CoordinatorMain`.
-      Files: c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\pom.xml
-      Verify: `& $mvn -f "<ROOT>\pom.xml" -N validate` passes AND `& $mvn -f "<ROOT>\coordinator\pom.xml" dependency:resolve` resolves all four dependencies with no version errors.
+- [ ] 3. Enclave: require `rawResponseB64` and hash the DECODED wire bytes for `rawHash`.
+      In `EnclaveService.java` `acquire`: (a) add `"rawResponseB64"` to the `require(request, ...)` call
+      alongside the existing field names. (b) Replace `String rawHash = sha256(canonical(rawPayload));`
+      with hashing of the decoded bytes:
+      `byte[] rawResponseBytes = java.util.Base64.getDecoder().decode((String) request.get("rawResponseB64"));`
+      `String rawHash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(rawResponseBytes));`
+      (wrap in try/catch or add a private `String sha256Bytes(byte[])` helper mirroring the existing
+      `sha256(String)` so no checked exception leaks — prefer the small helper for cleanliness). KEEP
+      `rawPayload` (parsed map) and its uses: `transform(rawPayload)` and
+      `evidence.put("rawPayload", rawPayload)` stay identical. The check
+      `if (!rawHash.equals(tlsProof.get("responseHash"))) throw ... TLS_PROOF_HASH_MISMATCH;` stays.
+      `binding`, `manifest`, keypair/signature, `evidence.put("rawPayloadDigest", rawHash)`,
+      `evidence.put("tlsProofResponseHash", rawHash)` all stay — they already read the new `rawHash`.
+      Files: `nitro-enclave/src/main/java/com/olea/dowsure/enclave/EnclaveService.java`
+      Verify: compiles under JDK 21 (covered by item 4's test run).
 
-- [x] 4. Implement the coordinator domain classes (canonicalizer, signer, adapters, Coordinator) — one coherent unit. (DONE)
-      Create under `<ROOT>/coordinator/src/main/java/com/olea/dowsure/coordinator/`:
-      `Canonicalizer.java` (static `canonicalize(Object)` reproducing the Python algorithm from D4 — sorted-key objects, compact separators, UTF-8, byte-exact);
-      `Signer.java` (load EC private key from PEM file, `base64(ECDSA-SHA256 sign(bytes))`; never log the key);
-      `OleaClient.java` (interface `Map<String,Object> post(String url, Map<String,Object> body)`) + `HttpOleaClient.java` (java.net.http or `HttpURLConnection`, 30s timeout, Content-Type application/json) — the only place that touches the network;
-      `EnclaveClient.java` (interface `Map<String,Object> invoke(int cid,int port,Map<String,Object> request)`) + `VsockEnclaveClient.java` (junixsocket `AFVSOCKSocketAddress`, send request, half-close write side before read, parse response, enforce `ok`);
-      `Coordinator.java` (orchestrates D4 steps 1-7 using injected `OleaClient`, `EnclaveClient`, `Signer`; builds challenge body, enclave request, envelope; returns the result map `{requestId, evidenceId, challenge, evidence}`). Pass `tlsProof` through untouched. Reuse the enclave's constants `source="mock-api"`, `endpoint="GET_ORDERS"`.
-      Files: c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\Canonicalizer.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\Signer.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\OleaClient.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\HttpOleaClient.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\EnclaveClient.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\VsockEnclaveClient.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\Coordinator.java
-      Verify: `& $mvn -f "<ROOT>\coordinator\pom.xml" compile` → BUILD SUCCESS.
+- [ ] 4. Enclave test: supply `rawResponseB64` whose decoded bytes hash to `tlsProof.responseHash`.
+      In `EnclaveServiceTest.java`, update all three tests that build a passing/`request` map so the
+      enclave's new hashing matches. Pattern per test: choose raw bytes (e.g.
+      `byte[] rawBytes = "{\"payload\":{\"Orders\":[{\"orderId\":\"123\"}]}}".getBytes(StandardCharsets.UTF_8);`),
+      set `String rawResponseB64 = Base64.getEncoder().encodeToString(rawBytes);`,
+      `String responseHash = service.sha256(new String(rawBytes, StandardCharsets.UTF_8));` — NOTE the
+      enclave hashes the bytes, so compute the expected hash from the SAME bytes; the simplest match is to
+      compute `responseHash` via a byte-based SHA-256 of `rawBytes` (e.g. a small test helper
+      `HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(rawBytes))`) so it equals the
+      enclave's `rawHash`. Build `proofMaterial` with that `responseHash`, derive
+      `proofHash = service.sha256(service.canonical(proofMaterial))`, build `proof` with
+      `responseHash` + `proofHash`, and build `request` adding `"rawResponseB64", rawResponseB64` while
+      KEEPING `"rawPayload", raw` (still needed for `transform`). For `rejectsTlsHashMismatch`, keep the
+      mismatch by giving `rawResponseB64` bytes that do NOT hash to the proof's `responseHash` (or keep
+      `responseHash="wrong"`), and still include a valid-base64 `rawResponseB64` so the `require` passes
+      and the code reaches the hash check. For `bindsNonceAndTlsProofHashIntoAttestationUserData`, update
+      the same way; its assertions on `userData.nonce`/`tlsProofHash` are unaffected. `Map.of(...)` has a
+      10-entry (20-arg) limit — the request map gains one key (now `rawResponseB64`); if any `Map.of`
+      call exceeds 10 entries, switch that literal to a `LinkedHashMap` built with `put`.
+      Files: `nitro-enclave/src/test/java/com/olea/dowsure/enclave/EnclaveServiceTest.java`
+      Verify (JDK 21 active via `juse21`), from the worktree root
+      `c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\bind-response-bytes`:
+      `juse21; mvn -q -pl nitro-enclave -am test` — all `EnclaveServiceTest` tests pass. (If a repo
+      `mvnw.cmd` is later added, `& .\mvnw.cmd -q -pl nitro-enclave -am test` is the equivalent.)
 
-- [x] 5. Implement the CLI entry point `CoordinatorMain`. (DONE — arg surface matches Python argparse; no-arg run prints usage to stderr, exit 2.)
-      Create `<ROOT>/coordinator/src/main/java/com/olea/dowsure/coordinator/CoordinatorMain.java`: parse the D5 args (defaults cid=16, port=5005; required args enforced with usage-to-stderr + non-zero exit), read the raw-payload and tls-proof JSON files as UTF-8, construct `HttpOleaClient` + `VsockEnclaveClient` + `Signer`, call `Coordinator`, and print the result map as indent-2 JSON to stdout. No tokens/keys/payloads/URLs logged.
-      Files: c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\main\java\com\olea\dowsure\coordinator\CoordinatorMain.java
-      Verify: `& $mvn -f "<ROOT>\coordinator\pom.xml" package -DskipTests` → BUILD SUCCESS and a shaded `coordinator-*.jar` is produced in `<ROOT>\coordinator\target`; `java -jar <that jar>` with no args prints usage and exits non-zero.
+- [ ] 5. Verifier: require `rawResponseB64` and hash DECODED wire bytes for the raw-payload digest check.
+      In `sam/olea/functions/verification/index.js` `submitEvidence`: (a) add `'rawResponseB64'` to the
+      `required` array. (b) Replace
+      `if (sha256(canonicalize(body.rawPayload)) !== body.rawPayloadDigest) throw new Error('RAW_PAYLOAD_HASH_MISMATCH');`
+      with
+      `const rawResponseBytes = Buffer.from(body.rawResponseB64, 'base64');`
+      `if (crypto.createHash('sha256').update(rawResponseBytes).digest('hex') !== body.rawPayloadDigest) throw new Error('RAW_PAYLOAD_HASH_MISMATCH');`
+      Leave the transformedPayload digest check, `tlsProofResponseHash === rawPayloadDigest`, manifest /
+      envelope / attestation / notary / nonce checks UNCHANGED. `buildManifest` needs no change.
+      Files: `sam/olea/functions/verification/index.js`
+      Verify: covered by item 6's `node --test` run.
 
-- [x] 6. Port the tests to JUnit 5 covering D6. (DONE — 17 tests across the 4 classes, all boundaries mocked, all green.)
-      Create `<ROOT>/coordinator/src/test/java/com/olea/dowsure/coordinator/` tests: `VsockFramingTest` (ported Python test — half-close-before-read ordering via a fake `EnclaveClient`/transport, plus `ok:false` propagation), `CanonicalizerTest` (byte-exact expected strings for nested object/array/scalar/UTF-8), `CoordinatorTest` (challenge body + enclave request + envelope key order/values using mocked `OleaClient` and `EnclaveClient`; no real network/vsock), `SignerTest` (ECDSA round-trip verify). Use jupiter + assertions like `EnclaveServiceTest`.
-      Files: c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\test\java\com\olea\dowsure\coordinator\VsockFramingTest.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\test\java\com\olea\dowsure\coordinator\CanonicalizerTest.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\test\java\com\olea\dowsure\coordinator\CoordinatorTest.java, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\src\test\java\com\olea\dowsure\coordinator\SignerTest.java
-      Verify: `& $mvn -f "<ROOT>\coordinator\pom.xml" test` → BUILD SUCCESS, all coordinator tests pass, no network access occurs.
+- [ ] 6. Verifier test: add a focused test for the new raw-bytes digest check in `submitEvidence`.
+      No existing JS test exercises `submitEvidence`. Add `index.test.js` in the verification dir using
+      the built-in runner (`const {test} = require('node:test'); const assert = require('node:assert');`).
+      Because `submitEvidence` reaches the digest check only after DynamoDB lookups (challenge/release),
+      prefer a UNIT-level assertion that does not require AWS: either (a) extract no code (keep scope to
+      three files) and instead assert the invariant directly against the shared contract — e.g. compute
+      `const bytes = Buffer.from('{"payload":{"Orders":[]}}'); const b64 = bytes.toString('base64');
+      const digest = require('node:crypto').createHash('sha256').update(bytes).digest('hex');` and assert
+      `require('node:crypto').createHash('sha256').update(Buffer.from(b64,'base64')).digest('hex') === digest`
+      to lock the base64->sha256 invariant the verifier now enforces; OR (b) if driving `submitEvidence`
+      end-to-end, stub the AWS SDK via `process.env` table names plus a mock — this is heavier and risks
+      scope creep, so prefer (a). The test MUST also assert the NEGATIVE: tampered base64 bytes produce a
+      different digest (so `RAW_PAYLOAD_HASH_MISMATCH` would fire). Do not log secrets.
+      Files: `sam/olea/functions/verification/index.test.js` (new)
+      Verify, from `c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\bind-response-bytes/sam/olea/functions/verification/`:
+      `node --test` — the new test and the existing `*.test.js` all pass.
 
-- [x] 7. Full-reactor build on **JDK 21** (integration of both modules). (DONE — `mvn -f <ROOT>\pom.xml clean test` → BUILD SUCCESS; enclave-service 2/2 and coordinator 17/17 green under JDK 21, the confirmed target. See verification.md.)
-      No new files; confirmed the parent builds both modules together.
-      Files: (none)
-
-- [x] 8. Remove the Python coordinator and its Python test (last, after Java is green). (DONE — coordinator.py, tests/test_coordinator.py, and stale __pycache__ removed; zero Python in the runtime dirs.)
-      Delete `<ROOT>/coordinator/coordinator.py`, `<ROOT>/coordinator/__pycache__/`, `<ROOT>/tests/test_coordinator.py`, and `<ROOT>/tests/__pycache__/`. If `<ROOT>/tests/` is left empty of Python and holds nothing else, remove the now-empty `tests/` dir. Use `git -C <ROOT> rm` so deletions are staged. Do NOT touch `docs/*.md` or `sam/mocks/**`.
-      Files: (deletions) c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\coordinator\coordinator.py, c:\Users\AnudeepSaiNunna\workspace\Kiro\logging\dowsure-oracle\.worktrees\coordinator-java\tests\test_coordinator.py (+ `__pycache__` dirs)
-      Verify: `& $mvn -f "<ROOT>\pom.xml" clean test` still BUILD SUCCESS; `Get-ChildItem <ROOT> -Recurse -Filter *.py -File | Where FullName -notmatch '\\sam\\|\\\.worktrees\\'` returns nothing under the runtime dirs (coordinator/enclave) — zero Python in the runtime.
-
----
-
-## Notes for the final report (do NOT act on these here)
-
-- Build toolchain: the repo has **no Maven wrapper**; the plan uses the pinned scoop Maven 3.9.16 with JDK 17. If a wrapper is later desired, that is a separate task.
-- `<ROOT>/nitro-enclave/pom.xml` compiler release was lowered 21 → 17 to meet the JDK-17 platform standard; the enclave compiles cleanly at 17 (verified). The enclave `Dockerfile` still uses Java 21 Corretto to build/run — release-17 bytecode is compatible, Dockerfile left untouched.
-- The enclave `Dockerfile` installs `rust`/`cargo` solely to build the native `libnsm.so` NSM library; that is a build-time native dep for attestation, not a Rust/Python *runtime* component, and is out of scope for this migration.
-- No `docs/*.md` reference to `coordinator.py` / `test_coordinator` was found in `<ROOT>/docs` or root `*.md`; matches appeared only under `<ROOT>/sam/docs/**` which is owned by another track — left for that track to update if needed.
-- `<ROOT>/scripts/phase1-evidence-report.js` consumes the coordinator stdout shape `{requestId, evidenceId, evidence{...}}`; the Java coordinator preserves this exact shape, so no JS change is required.
-
----
-
-## Finalization — COMPLETE
-
-All 8 ordered steps done. Status recorded for handoff.
-
-- **JDK target**: 21 across the reactor (parent pom + enclave), confirmed by the user as the intended target. The plan's original 17 wording (D2/D7, steps 1/2/7) was superseded; the enclave was NOT lowered to 17.
-- **Review**: `.agents/tasks/review.md` + `review.json` — verdict **APPROVED** (no blocking findings). Functional equivalence, fail-closed enclave `ok` gate, exact `tlsProof` pass-through, memory-only key handling / no secret logging, identical CLI surface, enclave-consistent vsock framing, and 17 mocked-boundary tests all confirmed.
-- **Verification**: `.agents/tasks/verification.md` — reactor BUILD SUCCESS on JDK 21 (enclave 2/2, coordinator 17/17); shaded CLI jar builds; no-arg run prints usage to stderr with exit 2. (Not re-run during review per instruction.)
-- **Merge**: branch `coordinator-python-to-java` merged into `main` with a `--no-ff` merge commit (`5d5abee`). No PR, no push — local history only, `main` ahead of `origin/main`. Diff `33c3b33..HEAD` verified to contain ONLY the intended 25-path migration (new parent + coordinator module + Java sources/tests, minimal enclave pom parent-wiring, Python removal, task records) — no docs/scripts/sam/target/evidence scope creep.
-- **Docs**: searched all tracked `*.md`; NO stale references to `coordinator.py` / `test_coordinator` / a Python runtime exist outside this task's own plan/verification. The only `python`/`cryptography` hits are unrelated (enclave EIF/PCR note in `sam/docs/`, generic library mentions in design docs). No doc update required.
-
-### Next step (follow-up, not part of this task)
-- Optional: delete the merged `coordinator-python-to-java` branch (and its worktree) once no longer needed. Left in place pending user confirmation.
-- Optional: push `main` to `origin` when ready (currently local-only, ahead by the migration + prior commits).
-
-**TASK FINISHED.**
+- [ ] 7. Final cross-component invariant review (no code change).
+      Re-read the three edited files and confirm invariants 1-5 above hold: sidecar b64 derives from the
+      same slice as `response_hash`; enclave `rawHash` now equals `sha256(base64decode(rawResponseB64))`
+      and still gates on `tlsProof.responseHash`; verifier hashes decoded bytes into the same digest it
+      compares to `rawPayloadDigest`/`tlsProofResponseHash`; the user_data binding map is unchanged; no
+      token/payload/PII was added to any log line. Confirm no unrelated code was reformatted.
+      Files: none (review)
+      Verify: re-run item 4 (`juse21; mvn -q -pl nitro-enclave -am test`) and item 6 (`node --test`);
+      both green. Sidecar remains manual-review (no `cargo`).

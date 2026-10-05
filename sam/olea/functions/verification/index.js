@@ -95,7 +95,7 @@ async function issueChallenge(body) {
 }
 
 async function submitEvidence(body) {
-  const required = ['requestId', 'evidenceId', 'nonce', 'policyVersion', 'source', 'endpoint', 'encryptedEvidenceReference', 'manifestDigest', 'submissionEnvelope', 'submissionSignature', 'rawPayload', 'rawPayloadDigest', 'transformedPayload', 'transformedPayloadDigest', 'canonicalizationVersion', 'tlsProofType', 'tlsProofHash', 'tlsProofResponseHash', 'tlsProof', 'attestationDocument', 'attestedPublicKeyBase64', 'enclaveSignature', 'eifDigest', 'pcr0', 'pcr1', 'pcr2'];
+  const required = ['requestId', 'evidenceId', 'nonce', 'policyVersion', 'source', 'endpoint', 'encryptedEvidenceReference', 'manifestDigest', 'submissionEnvelope', 'submissionSignature', 'rawPayload', 'rawResponseB64', 'rawPayloadDigest', 'transformedPayload', 'transformedPayloadDigest', 'canonicalizationVersion', 'tlsProofType', 'tlsProofHash', 'tlsProofResponseHash', 'tlsProof', 'attestationDocument', 'attestedPublicKeyBase64', 'enclaveSignature', 'eifDigest', 'pcr0', 'pcr1', 'pcr2'];
   if (!body || required.some((field) => !body[field])) return response(400, {status: 'REJECTED', reasonCode: 'PAYLOAD_CORRUPTED'});
   const {dynamo, s3, UpdateCommand, PutCommand, PutObjectCommand} = awsClients();
 
@@ -113,7 +113,8 @@ async function submitEvidence(body) {
 
   try {
     if (body.canonicalizationVersion !== 'RFC8785-PoC') throw new Error('CANONICALIZATION_VERSION_UNSUPPORTED');
-    if (sha256(canonicalize(body.rawPayload)) !== body.rawPayloadDigest) throw new Error('RAW_PAYLOAD_HASH_MISMATCH');
+    const rawResponseBytes = Buffer.from(body.rawResponseB64, 'base64');
+    if (crypto.createHash('sha256').update(rawResponseBytes).digest('hex') !== body.rawPayloadDigest) throw new Error('RAW_PAYLOAD_HASH_MISMATCH');
     if (sha256(canonicalize(body.transformedPayload)) !== body.transformedPayloadDigest) throw new Error('TRANSFORMED_PAYLOAD_HASH_MISMATCH');
     if (body.source !== 'mock-api' || body.endpoint !== 'GET_ORDERS') throw new Error('SOURCE_SCOPE_INVALID');
     if (body.tlsProofType !== 'tlsnotary' || body.tlsProofResponseHash !== body.rawPayloadDigest || !/^[a-f0-9]{64}$/i.test(body.tlsProofHash)) throw new Error('TLS_PROOF_INVALID');
