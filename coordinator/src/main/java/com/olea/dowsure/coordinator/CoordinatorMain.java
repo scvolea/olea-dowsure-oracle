@@ -24,8 +24,8 @@ import java.util.Map;
  */
 public final class CoordinatorMain {
     private static final String USAGE = String.join(System.lineSeparator(),
-            "usage: coordinator --olea-url URL --raw-payload-file FILE --tls-proof-file FILE",
-            "                   --dowsure-private-key-file FILE --eif-digest DIGEST",
+            "usage: coordinator --olea-url URL --raw-payload-file FILE --raw-response-b64-file FILE",
+            "                   --tls-proof-file FILE --dowsure-private-key-file FILE --eif-digest DIGEST",
             "                   [--enclave-cid CID] [--enclave-port PORT]");
 
     private CoordinatorMain() {
@@ -51,12 +51,14 @@ public final class CoordinatorMain {
         int enclaveCid = intOr(parsed, "--enclave-cid", 16);
         int enclavePort = intOr(parsed, "--enclave-port", 5005);
         Path rawPayloadFile = Path.of(required(parsed, "--raw-payload-file"));
+        Path rawResponseB64File = Path.of(required(parsed, "--raw-response-b64-file"));
         Path tlsProofFile = Path.of(required(parsed, "--tls-proof-file"));
         Path dowsurePrivateKeyFile = Path.of(required(parsed, "--dowsure-private-key-file"));
         String eifDigest = required(parsed, "--eif-digest");
 
         ObjectMapper mapper = new ObjectMapper();
         Object rawPayload = readJson(mapper, rawPayloadFile);
+        String rawResponseB64 = Files.readString(rawResponseB64File, StandardCharsets.UTF_8).strip();
         Object tlsProof = readJson(mapper, tlsProofFile);
 
         Coordinator coordinator = new Coordinator(
@@ -65,7 +67,7 @@ public final class CoordinatorMain {
                 new Signer());
 
         Map<String, Object> result = coordinator.run(
-                oleaUrl, enclaveCid, enclavePort, rawPayload, tlsProof, dowsurePrivateKeyFile, eifDigest);
+                oleaUrl, enclaveCid, enclavePort, rawPayload, rawResponseB64, tlsProof, dowsurePrivateKeyFile, eifDigest);
 
         System.out.println(mapper.writerWithDefaultPrettyPrinter().writeValueAsString(result));
     }
@@ -116,7 +118,7 @@ public final class CoordinatorMain {
 
     private static final java.util.Set<String> KNOWN = java.util.Set.of(
             "--olea-url", "--enclave-cid", "--enclave-port", "--raw-payload-file",
-            "--tls-proof-file", "--dowsure-private-key-file", "--eif-digest");
+            "--raw-response-b64-file", "--tls-proof-file", "--dowsure-private-key-file", "--eif-digest");
 
     /** Signals a bad CLI invocation (usage + non-zero exit). */
     static final class ArgumentException extends RuntimeException {

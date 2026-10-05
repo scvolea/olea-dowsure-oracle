@@ -48,6 +48,8 @@ class EnclaveServiceTest {
         Map<String, Object> evidence = service.acquire(request(raw, rawResponseB64, proof));
 
         assertEquals(rawHash, evidence.get("rawPayloadDigest"));
+        // The enclave echoes back the exact rawResponseB64 it received into evidence.
+        assertEquals(rawResponseB64, evidence.get("rawResponseB64"));
         assertEquals(rawHash, evidence.get("tlsProofResponseHash"));
         assertEquals("tlsnotary", evidence.get("tlsProofType"));
         assertEquals("attestation", new String(Base64.getUrlDecoder().decode((String) evidence.get("attestationDocument"))));

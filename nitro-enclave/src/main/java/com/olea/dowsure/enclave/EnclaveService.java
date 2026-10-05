@@ -74,6 +74,7 @@ public final class EnclaveService {
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("rawPayload", rawPayload);
         evidence.put("rawPayloadDigest", rawHash);
+        evidence.put("rawResponseB64", request.get("rawResponseB64"));
         evidence.put("transformedPayload", transformed);
         evidence.put("transformedPayloadDigest", transformedHash);
         evidence.put("canonicalizationVersion", CANONICALIZATION);

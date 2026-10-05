@@ -55,7 +55,7 @@ public final class Coordinator {
      * {@code tlsProof} opaque pass-through from the Python coordinator.
      */
     static Map<String, Object> enclaveRequest(String requestId, Map<String, Object> challenge, Object rawPayload,
-                                              Object tlsProof, String evidenceId, String eifDigest) {
+                                              String rawResponseB64, Object tlsProof, String evidenceId, String eifDigest) {
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("requestId", requestId);
         request.put("source", SOURCE);
@@ -63,6 +63,7 @@ public final class Coordinator {
         request.put("nonce", challenge.get("nonce"));
         request.put("policyVersion", challenge.get("policyVersion"));
         request.put("rawPayload", rawPayload);
+        request.put("rawResponseB64", rawResponseB64);
         request.put("tlsProof", tlsProof);
         request.put("evidenceId", evidenceId);
         request.put("eifDigest", eifDigest);
@@ -93,14 +94,14 @@ public final class Coordinator {
      * {@code scripts/phase1-evidence-report.js} consumes verbatim.
      */
     public Map<String, Object> run(String oleaUrl, int enclaveCid, int enclavePort,
-                                    Object rawPayload, Object tlsProof, Path dowsurePrivateKeyFile, String eifDigest) {
+                                    Object rawPayload, String rawResponseB64, Object tlsProof, Path dowsurePrivateKeyFile, String eifDigest) {
         String requestId = UUID.randomUUID().toString();
         String evidenceId = UUID.randomUUID().toString();
 
         Map<String, Object> challenge = oleaClient.post(oleaUrl + "/v1/challenges", challengeBody(requestId));
 
         Map<String, Object> evidence = enclaveClient.invoke(enclaveCid, enclavePort,
-                enclaveRequest(requestId, challenge, rawPayload, tlsProof, evidenceId, eifDigest));
+                enclaveRequest(requestId, challenge, rawPayload, rawResponseB64, tlsProof, evidenceId, eifDigest));
 
         String submittedAt = isoUtcNow();
         Map<String, Object> envelope = submissionEnvelope(requestId, challenge, evidenceId, evidence, submittedAt);
