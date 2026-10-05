@@ -52,9 +52,6 @@ use tlsn_core::{
     transcript::TranscriptCommitConfig,
     CryptoProvider,
 };
-use tlsn_formats::http::{
-    parse_request, parse_response, DefaultHttpCommitter, HttpCommit, HttpTranscript,
-};
 use tlsn_prover::{Prover, ProverConfig};
 
 const USER_AGENT: &str =
@@ -278,37 +275,43 @@ async fn main() -> Result<()> {
 
     // 5) Commit to the transcript and request the attestation (notarize).
     //
-    // Amazon sends `Connection: close`, so the recv transcript carries trailing
-    // close_notify / connection-close framing AFTER the HTTP response. The upstream
-    // whole-buffer HttpTranscript::parse rejects that trailing data
-    // ("trailing characters are present in source" from the JSON body parser). Parse
-    // exactly ONE request and ONE response instead (spansy bounds each message by
-    // Content-Length and ignores the trailing bytes), then build the HttpTranscript
-    // from them so commit/reveal operate on exactly the HTTP message byte range.
+    // Amazon's real SP-API response is a JSON body shaped `{"payload":[ ... ]}`.
+    // Structurally parsing it as HTTP+JSON (the old DefaultHttpCommitter /
+    // HttpTranscript / parse_response path) runs spansy's JSON body parser, which
+    // rejects the real body with ParseError("trailing characters are present in
+    // source") even when there is NO trailing TLS framing (http_message_len ==
+    // total_recv_len). The fix: commit the transcript as an OPAQUE BYTE RANGE and
+    // never structurally parse the HTTP/JSON. We commit sent [0, s) (the full
+    // request) and recv [0, n), where n is the true end of the HTTP response
+    // computed robustly from the recv buffer (end-of-headers + Content-Length, with
+    // a safe fallback to the whole buffer). The alpha.12 tlsn-core API used here is
+    //   TranscriptCommitConfigBuilder::commit_sent(&dyn ToRangeSet<usize>)
+    //   TranscriptCommitConfigBuilder::commit_recv(&dyn ToRangeSet<usize>)
+    // mirroring the upstream interactive.rs idiom `builder.reveal_recv(&(0..pos))`.
     let sent_bytes = prover.transcript().sent();
     let recv_bytes = prover.transcript().received();
     let total_recv = recv_bytes.len();
-    let detected = http_message_end(recv_bytes).unwrap_or(total_recv);
+    let s = sent_bytes.len();
+    // n = true end of the HTTP response. http_message_end does CRLFCRLF +
+    // Content-Length; fall back to the whole buffer (chunked / no Content-Length /
+    // unparsable) and clamp into [0, total_recv]. Never fail.
+    let n = http_message_end(recv_bytes)
+        .unwrap_or(total_recv)
+        .min(total_recv);
     tracing::info!(
-        http_message_len = detected,
+        http_message_len = n,
         total_recv_len = total_recv,
-        trailing_bytes = total_recv.saturating_sub(detected),
-        "bounding recv transcript to the HTTP message (excluding Connection: close framing)"
+        trailing_bytes = total_recv.saturating_sub(n),
+        "committing/revealing recv transcript as raw byte range [0, n)"
     );
 
-    let request =
-        parse_request(sent_bytes).map_err(|e| anyhow!("parse http request: {e:?}"))?;
-    let response =
-        parse_response(recv_bytes).map_err(|e| anyhow!("parse http response: {e:?}"))?;
-    let transcript = HttpTranscript {
-        requests: vec![request],
-        responses: vec![response],
-    };
-
     let mut commit_builder = TranscriptCommitConfig::builder(prover.transcript());
-    DefaultHttpCommitter::default()
-        .commit_transcript(&mut commit_builder, &transcript)
-        .map_err(|e| anyhow!("commit transcript: {e:?}"))?;
+    commit_builder
+        .commit_sent(&(0..s))
+        .map_err(|e| anyhow!("commit sent range: {e:?}"))?;
+    commit_builder
+        .commit_recv(&(0..n))
+        .map_err(|e| anyhow!("commit recv range: {e:?}"))?;
     let transcript_commit = commit_builder
         .build()
         .map_err(|e| anyhow!("build commit: {e:?}"))?;
@@ -325,27 +328,26 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| anyhow!("notarize: {e:?}"))?;
 
-    // 6) Build a presentation revealing the HTTP message (bounded identically to the
-    //    commit side so the revealed response excludes the Connection: close framing).
+    // 6) Build a presentation revealing the SAME raw byte ranges that were committed
+    //    in step 5. prover.transcript() (commit site) and secrets.transcript()
+    //    (reveal site) are the same session transcript, so recomputing s/n here from
+    //    secrets yields the identical (0..s)/(0..n) -> the revealed idx is an exact
+    //    subset of the committed idx and reveal succeeds. No HTTP/JSON parse.
+    //    alpha.12 API: TranscriptProofBuilder::reveal_sent/reveal_recv(&dyn ToRangeSet<usize>).
     let secret_sent = secrets.transcript().sent();
     let secret_recv = secrets.transcript().received();
-    let request =
-        parse_request(secret_sent).map_err(|e| anyhow!("parse secrets request: {e:?}"))?;
-    let response =
-        parse_response(secret_recv).map_err(|e| anyhow!("parse secrets response: {e:?}"))?;
-    let transcript = HttpTranscript {
-        requests: vec![request],
-        responses: vec![response],
-    };
+    let s = secret_sent.len();
+    let total_recv = secret_recv.len();
+    let n = http_message_end(secret_recv)
+        .unwrap_or(total_recv)
+        .min(total_recv);
     let mut tp_builder = secrets.transcript_proof_builder();
-    let req0 = &transcript.requests[0];
     tp_builder
-        .reveal_sent(req0)
-        .map_err(|e| anyhow!("reveal sent: {e:?}"))?;
-    let resp0 = &transcript.responses[0];
+        .reveal_sent(&(0..s))
+        .map_err(|e| anyhow!("reveal sent range: {e:?}"))?;
     tp_builder
-        .reveal_recv(resp0)
-        .map_err(|e| anyhow!("reveal recv: {e:?}"))?;
+        .reveal_recv(&(0..n))
+        .map_err(|e| anyhow!("reveal recv range: {e:?}"))?;
     let transcript_proof = tp_builder
         .build()
         .map_err(|e| anyhow!("build transcript proof: {e:?}"))?;
@@ -382,11 +384,24 @@ async fn main() -> Result<()> {
 
     let mut partial = verified_transcript.ok_or_else(|| anyhow!("no transcript revealed"))?;
     partial.set_unauthed(b'X');
-    let sent = String::from_utf8_lossy(partial.sent_unsafe()).to_string();
-    let recv = String::from_utf8_lossy(partial.received_unsafe()).to_string();
+    // Hash EXACTLY the revealed byte ranges, not the X-padded full buffer. The
+    // revealed sent/recv ranges are the single contiguous (0..S)/(0..N) committed
+    // in step 5, so received_authed().end() == N and sent_authed().end() == S are
+    // the exclusive ends of the revealed spans. Slicing received_unsafe()[..N]
+    // yields exactly the revealed response bytes with no X padding and no
+    // truncation, so response_hash = sha256(revealed recv [0,N)) is byte-exact.
+    // Hash the raw bytes (not the lossy-UTF-8 re-encoding) so the hash stays exact
+    // even for a non-UTF-8 body.
+    let sent_end = partial.sent_authed().end();
+    let recv_end = partial.received_authed().end();
+    let sent_bytes_revealed = &partial.sent_unsafe()[..sent_end];
+    let recv_bytes_revealed = &partial.received_unsafe()[..recv_end];
 
-    let request_commitment = sha256_hex(sent.as_bytes());
-    let response_hash = sha256_hex(recv.as_bytes());
+    let request_commitment = sha256_hex(sent_bytes_revealed);
+    let response_hash = sha256_hex(recv_bytes_revealed);
+    // Previews are human-readable only; lossy UTF-8 over the revealed bytes is fine.
+    let sent = String::from_utf8_lossy(sent_bytes_revealed).to_string();
+    let recv = String::from_utf8_lossy(recv_bytes_revealed).to_string();
 
     let bundle = ProofBundle {
         ok: true,
@@ -416,8 +431,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 /// Returns the end offset (exclusive) of the single HTTP message at the front of
-/// `buf`: end-of-headers (CRLFCRLF) + Content-Length. Used only for logging and a
-/// sanity check; the authoritative range comes from spansy's parse_response.
+/// `buf`: end-of-headers (CRLFCRLF) + Content-Length. This is the authoritative
+/// bound `n` applied to the committed and revealed recv byte range `[0, n)`.
+/// Returns `None` only when end-of-headers or a usable Content-Length cannot be
+/// found; callers fall back to the whole buffer so this never fails the run.
 fn http_message_end(buf: &[u8]) -> Option<usize> {
     let headers_end = buf
         .windows(4)
