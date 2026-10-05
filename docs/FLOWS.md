@@ -68,10 +68,10 @@ sales and financial history.
 
 ```mermaid
 flowchart LR
-    S[Seller] -->|authorizes via LWA| A[Amazon SP-API]
-    A -->|getOrderMetrics| M[Shop SALES signal]
-    A -->|listFinancialEventGroups| F[Shop FINANCIALS]
-    M --> O[Onboarding dataset]
+    S["Seller"] -->|authorizes via LWA| A["Amazon SP-API"]
+    A -->|getOrderMetrics| M["Shop SALES signal"]
+    A -->|listFinancialEventGroups| F["Shop FINANCIALS"]
+    M --> O["Onboarding dataset"]
     F --> O
 ```
 
@@ -112,15 +112,15 @@ PO (Super Purchase Order).
 
 ```mermaid
 flowchart TD
-    D1[Merchant: drawdown on Pay In page] --> D2[Dowsure: check & allocate credit, create drawdown record]
-    D2 --> D3[Pull seller-authorized SP-API Finances Transactions: listTransactions]
-    D3 --> D4[Select eligible orders, accumulate principal to Target]
-    D4 --> D5[Submit FR Invoice batch to Olea]
-    D5 --> D6[Olea: ACCEPTED + batch id]
-    D6 --> D7[Wait for order-level confirmation]
-    D7 --> D8[Aggregate one Super PO per drawdown]
-    D8 --> D9[Submit Super PO to Olea]
-    D9 --> D10[Check final confirmation]
+    D1["Merchant: drawdown on Pay In page"] --> D2["Dowsure: check and allocate credit, create drawdown record"]
+    D2 --> D3["Pull seller-authorized SP-API Finances Transactions: listTransactions"]
+    D3 --> D4["Select eligible orders, accumulate principal to Target"]
+    D4 --> D5["Submit FR Invoice batch to Olea"]
+    D5 --> D6["Olea: ACCEPTED + batch id"]
+    D6 --> D7["Wait for order-level confirmation"]
+    D7 --> D8["Aggregate one Super PO per drawdown"]
+    D8 --> D9["Submit Super PO to Olea"]
+    D9 --> D10["Check final confirmation"]
 ```
 
 **Steps:**
@@ -166,12 +166,12 @@ enclave.
 
 ```mermaid
 flowchart TD
-    R1[Supplier initiates pay-in on Dowsure] --> R2[Repayment schedule generated]
-    R2 --> R3[Dowsure transmits schedule to Amazon daily]
-    R3 --> R4[Amazon deducts funds per schedule]
-    R4 --> R5[Notification: repaymentId <-> repaymentScheduled; reconciliationId matches HSBC reconciliation id]
-    R5 --> R6[Deducted payload: referenceResourceId <-> repaymentId]
-    R6 --> R7[Results viewable by Olea ONLY inside TLS+TEE]
+    R1["Supplier initiates pay-in on Dowsure"] --> R2["Repayment schedule generated"]
+    R2 --> R3["Dowsure transmits schedule to Amazon daily"]
+    R3 --> R4["Amazon deducts funds per schedule"]
+    R4 --> R5["Notification: repaymentId maps to repaymentScheduled; reconciliationId matches HSBC reconciliation id"]
+    R5 --> R6["Deducted payload: referenceResourceId maps to repaymentId"]
+    R6 --> R7["Results viewable by Olea ONLY inside TLS+TEE"]
 ```
 
 **Steps:**
@@ -204,21 +204,16 @@ verified today.
 
 ```mermaid
 flowchart LR
-    SRC[Approved source endpoint] --> TLS[TLSNotary PLACEHOLDER
-    intentionally fail-closed]
-    TLS --> CO[Dowsure coordinator
-    coordinator.py defaults CID 16 / port 5005]
-    CO -->|vsock| EN[Java enclave
-    EnclaveMain serves CID 16 / port 5005
-    source='mock-api' endpoint='GET_ORDERS']
-    EN --> RH[Raw-source hash]
-    EN --> TF[Deterministic transform]
-    TF --> TH[Transformed hash]
-    EN --> KP[Ephemeral P-256 key]
-    KP --> AT[Nitro attestation via NSM]
-    AT --> V[Olea verify: COSE, cert chain, PCR0/1/2,
-    attested public key, canonicalized user_data vs AWS Nitro Root-G1]
-    V --> EV[Evidence vault / receipt]
+    SRC["Approved source endpoint"] --> TLS["TLSNotary proof<br/>MPC-TLS, Olea-pinned notary key"]
+    TLS --> CO["Dowsure coordinator<br/>defaults CID 16 / port 5005"]
+    CO -->|vsock| EN["Java enclave<br/>EnclaveMain serves CID 16 / port 5005<br/>source=mock-api endpoint=GET_ORDERS"]
+    EN --> RH["rawHash = SHA256(decode(rawResponseB64))<br/>gate: rawHash == tlsProof.responseHash"]
+    EN --> TF["Deterministic transform"]
+    TF --> TH["Transformed hash"]
+    EN --> KP["Ephemeral P-256 key"]
+    KP --> AT["Nitro attestation via NSM"]
+    AT --> V["Olea verify: COSE, cert chain, PCR0/1/2,<br/>attested public key, canonical user_data vs AWS Nitro Root-G1"]
+    V --> EV["Evidence vault / receipt"]
 ```
 
 **Steps:**
@@ -273,12 +268,11 @@ not as code integration.
 
 ```mermaid
 flowchart TD
-    K1[Identity three-element check: AliCloud] --> K2[Enterprise + judicial checks: Qichacha]
-    K2 --> K3[Judicial panorama: Gutu / valuemap]
-    K3 --> K4[Rule-check engine ~16 rules
-    each PASS / REJECT / UNKNOWN with a reason]
-    K4 --> K5[Overall risk level: NONE / MEDIUM / HIGH]
-    K5 --> K6[Recommended decision: Accept / Review / Reject]
+    K1["Identity three-element check: AliCloud"] --> K2["Enterprise + judicial checks: Qichacha"]
+    K2 --> K3["Judicial panorama: Gutu / valuemap"]
+    K3 --> K4["Rule-check engine ~16 rules<br/>each PASS / REJECT / UNKNOWN with a reason"]
+    K4 --> K5["Overall risk level: NONE / MEDIUM / HIGH"]
+    K5 --> K6["Recommended decision: Accept / Review / Reject"]
 ```
 
 **Steps:**
