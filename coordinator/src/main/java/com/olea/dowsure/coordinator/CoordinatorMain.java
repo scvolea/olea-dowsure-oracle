@@ -11,12 +11,11 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * CLI entry point, with the SAME argument surface as the Python coordinator's
- * argparse: {@code --olea-url} (required), {@code --enclave-cid} (default 16),
- * {@code --enclave-port} (default 5005), {@code --raw-payload-file} (required),
- * {@code --tls-proof-file} (required), {@code --dowsure-private-key-file}
- * (required), {@code --eif-digest} (required). ({@code requestId}/{@code evidenceId}
- * are generated, not args.)
+ * CLI entry point: {@code --olea-url} (required), {@code --source-id} (required),
+ * {@code --request-body-file} (optional; parsed as JSON into the request body for
+ * POST sources), {@code --dowsure-private-key-file} (required), {@code --eif-digest}
+ * (required), {@code --enclave-cid} (default 16), {@code --enclave-port} (default
+ * 5005). ({@code requestId}/{@code evidenceId} are generated, not args.)
  *
  * <p>Unknown or missing required args print usage to stderr and exit non-zero.
  * The result map is printed to stdout as indent-2 JSON. No tokens, keys, raw
@@ -24,8 +23,8 @@ import java.util.Map;
  */
 public final class CoordinatorMain {
     private static final String USAGE = String.join(System.lineSeparator(),
-            "usage: coordinator --olea-url URL --raw-payload-file FILE --raw-response-b64-file FILE",
-            "                   --tls-proof-file FILE --dowsure-private-key-file FILE --eif-digest DIGEST",
+            "usage: coordinator --olea-url URL --source-id SOURCE_ID [--request-body-file FILE]",
+            "                   --dowsure-private-key-file FILE --eif-digest DIGEST",
             "                   [--enclave-cid CID] [--enclave-port PORT]");
 
     private CoordinatorMain() {
@@ -50,16 +49,13 @@ public final class CoordinatorMain {
         String oleaUrl = required(parsed, "--olea-url");
         int enclaveCid = intOr(parsed, "--enclave-cid", 16);
         int enclavePort = intOr(parsed, "--enclave-port", 5005);
-        Path rawPayloadFile = Path.of(required(parsed, "--raw-payload-file"));
-        Path rawResponseB64File = Path.of(required(parsed, "--raw-response-b64-file"));
-        Path tlsProofFile = Path.of(required(parsed, "--tls-proof-file"));
+        String sourceId = required(parsed, "--source-id");
         Path dowsurePrivateKeyFile = Path.of(required(parsed, "--dowsure-private-key-file"));
         String eifDigest = required(parsed, "--eif-digest");
 
         ObjectMapper mapper = new ObjectMapper();
-        Object rawPayload = readJson(mapper, rawPayloadFile);
-        String rawResponseB64 = Files.readString(rawResponseB64File, StandardCharsets.UTF_8).strip();
-        Object tlsProof = readJson(mapper, tlsProofFile);
+        String requestBodyFile = parsed.get("--request-body-file");
+        Object requestBody = requestBodyFile == null ? null : readJson(mapper, Path.of(requestBodyFile));
 
         Coordinator coordinator = new Coordinator(
                 new HttpOleaClient(mapper),
@@ -67,7 +63,7 @@ public final class CoordinatorMain {
                 new Signer());
 
         Map<String, Object> result = coordinator.run(
-                oleaUrl, enclaveCid, enclavePort, rawPayload, rawResponseB64, tlsProof, dowsurePrivateKeyFile, eifDigest);
+                oleaUrl, enclaveCid, enclavePort, sourceId, requestBody, dowsurePrivateKeyFile, eifDigest);
 
         System.out.println(mapper.writerWithDefaultPrettyPrinter().writeValueAsString(result));
     }
@@ -117,8 +113,8 @@ public final class CoordinatorMain {
     }
 
     private static final java.util.Set<String> KNOWN = java.util.Set.of(
-            "--olea-url", "--enclave-cid", "--enclave-port", "--raw-payload-file",
-            "--raw-response-b64-file", "--tls-proof-file", "--dowsure-private-key-file", "--eif-digest");
+            "--olea-url", "--enclave-cid", "--enclave-port", "--source-id",
+            "--request-body-file", "--dowsure-private-key-file", "--eif-digest");
 
     /** Signals a bad CLI invocation (usage + non-zero exit). */
     static final class ArgumentException extends RuntimeException {

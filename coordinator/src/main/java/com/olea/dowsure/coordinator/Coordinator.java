@@ -17,15 +17,12 @@ import java.util.UUID;
  *
  * <p>All cloud/vendor access is behind the injected {@link OleaClient} and
  * {@link EnclaveClient} adapters. The ephemeral private key is read only inside
- * {@link Signer} during signing and is never logged or persisted. The
- * {@code tlsProof} value is passed through to the enclave untouched — the
- * enclave, not the coordinator, validates it (TLSNotary proof is a separate
- * upcoming task; the placeholder contract field stays wire-compatible).
+ * {@link Signer} during signing and is never logged or persisted. The enclave
+ * is driven by {@code sourceId} (and an optional {@code requestBody} for POST
+ * sources); the enclave itself fetches the response bytes over its own TLS, so
+ * the coordinator no longer threads response bytes or a TLS proof.
  */
 public final class Coordinator {
-    private static final String SOURCE = "mock-api";
-    private static final String ENDPOINT = "GET_ORDERS";
-
     private final OleaClient oleaClient;
     private final EnclaveClient enclaveClient;
     private final Signer signer;
@@ -40,33 +37,30 @@ public final class Coordinator {
      * Builds the challenge request body sent to {@code <olea-url>/v1/challenges}.
      * Exposed (package-private) so tests can assert the exact body shape.
      */
-    static Map<String, Object> challengeBody(String requestId) {
+    static Map<String, Object> challengeBody(String requestId, String sourceId) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("requestId", requestId);
-        body.put("source", SOURCE);
-        body.put("endpoint", ENDPOINT);
-        body.put("operation", ENDPOINT);
+        body.put("sourceId", sourceId);
         body.put("policyVersion", "v1.0");
         return body;
     }
 
     /**
-     * Builds the enclave request map, preserving the exact field set and the
-     * {@code tlsProof} opaque pass-through from the Python coordinator.
+     * Builds the enclave request map. The enclave is driven by {@code sourceId};
+     * {@code requestBody} is included only for POST sources (omitted when null).
      */
-    static Map<String, Object> enclaveRequest(String requestId, Map<String, Object> challenge, Object rawPayload,
-                                              String rawResponseB64, Object tlsProof, String evidenceId, String eifDigest) {
+    static Map<String, Object> enclaveRequest(String requestId, Map<String, Object> challenge, String sourceId,
+                                              Object requestBody, String evidenceId, String eifDigest) {
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("requestId", requestId);
-        request.put("source", SOURCE);
-        request.put("endpoint", ENDPOINT);
         request.put("nonce", challenge.get("nonce"));
         request.put("policyVersion", challenge.get("policyVersion"));
-        request.put("rawPayload", rawPayload);
-        request.put("rawResponseB64", rawResponseB64);
-        request.put("tlsProof", tlsProof);
         request.put("evidenceId", evidenceId);
         request.put("eifDigest", eifDigest);
+        request.put("sourceId", sourceId);
+        if (requestBody != null) {
+            request.put("requestBody", requestBody);
+        }
         return request;
     }
 
@@ -94,14 +88,14 @@ public final class Coordinator {
      * {@code scripts/phase1-evidence-report.js} consumes verbatim.
      */
     public Map<String, Object> run(String oleaUrl, int enclaveCid, int enclavePort,
-                                    Object rawPayload, String rawResponseB64, Object tlsProof, Path dowsurePrivateKeyFile, String eifDigest) {
+                                    String sourceId, Object requestBody, Path dowsurePrivateKeyFile, String eifDigest) {
         String requestId = UUID.randomUUID().toString();
         String evidenceId = UUID.randomUUID().toString();
 
-        Map<String, Object> challenge = oleaClient.post(oleaUrl + "/v1/challenges", challengeBody(requestId));
+        Map<String, Object> challenge = oleaClient.post(oleaUrl + "/v1/challenges", challengeBody(requestId, sourceId));
 
         Map<String, Object> evidence = enclaveClient.invoke(enclaveCid, enclavePort,
-                enclaveRequest(requestId, challenge, rawPayload, rawResponseB64, tlsProof, evidenceId, eifDigest));
+                enclaveRequest(requestId, challenge, sourceId, requestBody, evidenceId, eifDigest));
 
         String submittedAt = isoUtcNow();
         Map<String, Object> envelope = submissionEnvelope(requestId, challenge, evidenceId, evidence, submittedAt);

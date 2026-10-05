@@ -99,35 +99,40 @@ class CoordinatorTest {
 
     @Test
     void challengeBodyHasExactShape() {
-        Map<String, Object> body = Coordinator.challengeBody("req-1");
+        Map<String, Object> body = Coordinator.challengeBody("req-1", "getOrderMetrics");
         assertEquals("req-1", body.get("requestId"));
-        assertEquals("mock-api", body.get("source"));
-        assertEquals("GET_ORDERS", body.get("endpoint"));
-        assertEquals("GET_ORDERS", body.get("operation"));
+        assertEquals("getOrderMetrics", body.get("sourceId"));
         assertEquals("v1.0", body.get("policyVersion"));
-        assertEquals(5, body.size());
+        assertEquals(3, body.size());
     }
 
     @Test
-    void enclaveRequestPassesTlsProofThroughUntouched() {
-        Map<String, Object> tlsProof = Map.of("proofType", "tlsnotary", "transcript", "opaque");
-        Map<String, Object> rawPayload = Map.of("payload", Map.of("Orders", List.of()));
-        String rawResponseB64 = "cmF3LXJlc3BvbnNlLWJ5dGVz";
+    void enclaveRequestCarriesSourceIdAndRequestBodyAndDropsLegacyFields() {
+        Map<String, Object> requestBody = Map.of("companyName", "Acme");
         Map<String, Object> request = Coordinator.enclaveRequest(
-                "req-1", sampleChallenge(), rawPayload, rawResponseB64, tlsProof, "ev-1", "eif-digest");
+                "req-1", sampleChallenge(), "gutuPanoramaChecks", requestBody, "ev-1", "eif-digest");
 
         assertEquals("req-1", request.get("requestId"));
-        assertEquals("mock-api", request.get("source"));
-        assertEquals("GET_ORDERS", request.get("endpoint"));
         assertEquals("nonce-xyz", request.get("nonce"));
         assertEquals("v1.0", request.get("policyVersion"));
         assertEquals("ev-1", request.get("evidenceId"));
         assertEquals("eif-digest", request.get("eifDigest"));
-        assertEquals(rawPayload, request.get("rawPayload"));
-        // rawResponseB64 is a SEPARATE top-level field, not inside tlsProof.
-        assertEquals(rawResponseB64, request.get("rawResponseB64"));
-        // tlsProof is the exact same reference, not reshaped or validated.
-        assertTrue(tlsProof == request.get("tlsProof"), "tlsProof must pass through untouched");
+        assertEquals("gutuPanoramaChecks", request.get("sourceId"));
+        // requestBody is carried through for the POST case.
+        assertEquals(requestBody, request.get("requestBody"));
+        // Legacy response/proof fields are gone — the enclave fetches R itself.
+        assertTrue(!request.containsKey("rawPayload"), "rawPayload must be dropped");
+        assertTrue(!request.containsKey("rawResponseB64"), "rawResponseB64 must be dropped");
+        assertTrue(!request.containsKey("tlsProof"), "tlsProof must be dropped");
+    }
+
+    @Test
+    void enclaveRequestOmitsRequestBodyWhenNull() {
+        Map<String, Object> request = Coordinator.enclaveRequest(
+                "req-1", sampleChallenge(), "getOrderMetrics", null, "ev-1", "eif-digest");
+
+        assertEquals("getOrderMetrics", request.get("sourceId"));
+        assertTrue(!request.containsKey("requestBody"), "requestBody must be omitted when null");
     }
 
     @Test
@@ -154,23 +159,19 @@ class CoordinatorTest {
         TestKey testKey = writeTestKey(tempDir);
         Path keyFile = testKey.file();
         Coordinator coordinator = new Coordinator(olea, enclave, new Signer());
-        Map<String, Object> tlsProof = Map.of("proofType", "tlsnotary");
-        Map<String, Object> rawPayload = Map.of("payload", Map.of("Orders", List.of()));
-        String rawResponseB64 = "cmF3LXJlc3BvbnNlLWJ5dGVz";
+        String sourceId = "getOrderMetrics";
 
         Map<String, Object> result = coordinator.run(
-                OLEA_URL, 16, 5005, rawPayload, rawResponseB64, tlsProof, keyFile, "eif-digest");
+                OLEA_URL, 16, 5005, sourceId, null, keyFile, "eif-digest");
 
         // Olea challenge call targeted the right URL and sent the exact body.
         assertEquals(OLEA_URL + "/v1/challenges", olea.url);
-        assertEquals(Coordinator.challengeBody((String) result.get("requestId")), olea.body);
+        assertEquals(Coordinator.challengeBody((String) result.get("requestId"), sourceId), olea.body);
 
-        // Enclave invoked at the given cid/port with tlsProof passed through.
+        // Enclave invoked at the given cid/port driven by sourceId.
         assertEquals(16, enclave.cid);
         assertEquals(5005, enclave.port);
-        assertTrue(tlsProof == enclave.request.get("tlsProof"));
-        // rawResponseB64 threaded through to the enclave request as a top-level field.
-        assertEquals(rawResponseB64, enclave.request.get("rawResponseB64"));
+        assertEquals(sourceId, enclave.request.get("sourceId"));
 
         // Result shape consumed by scripts/phase1-evidence-report.js.
         assertEquals(List.of("requestId", "evidenceId", "challenge", "evidence"),
@@ -201,7 +202,7 @@ class CoordinatorTest {
         Coordinator coordinator = new Coordinator(olea, enclave, new Signer());
 
         IllegalStateException error = assertThrows(IllegalStateException.class, () -> coordinator.run(
-                OLEA_URL, 16, 5005, Map.of(), "cmF3", Map.of(), writeTestKey(tempDir).file(), "eif-digest"));
+                OLEA_URL, 16, 5005, "getOrderMetrics", null, writeTestKey(tempDir).file(), "eif-digest"));
         assertEquals("POLICY_SCOPE_INVALID", error.getMessage());
     }
 }
