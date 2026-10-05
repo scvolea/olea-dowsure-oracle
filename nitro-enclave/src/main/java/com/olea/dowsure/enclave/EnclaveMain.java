@@ -15,8 +15,9 @@ public final class EnclaveMain {
     public static void main(String[] args) {
         ObjectMapper mapper = new ObjectMapper();
         SourceRegistry sourceRegistry = new SourceRegistry();
-        // Production transport: vsock->TCP binding handed back as a base Socket for the TLS client to wrap.
-        SourceTransport transport = new SourceTransport.TcpSourceTransport();
+        // Production egress: dial the parent's vsock-proxy, which relays bytes to the real host:443.
+        // Independent of the inbound vsock server below (CID 16 / port 5005).
+        SourceTransport transport = AfVsockSourceTransport.fromEnv(System.getenv());
         SourceTlsClient sourceTlsClient = new SourceTlsClient(transport, CA_BUNDLE);
         CredentialProvider credentialProvider = new PocCredentialProvider();
         EnclaveService service = new EnclaveService(mapper, new JnaAttestationProvider(),

@@ -17,11 +17,13 @@ RUN git clone --depth 1 --branch v0.5.2 https://github.com/aws/aws-nitro-enclave
 
 FROM amazonlinux:2023
 
-RUN dnf install -y java-21-amazon-corretto-headless \
+RUN dnf install -y java-21-amazon-corretto-headless ca-certificates \
 	&& dnf clean all \
 	&& rm -rf /var/cache/dnf
 COPY --from=builder /tmp/libnsm.so /usr/lib64/libnsm.so
 COPY --from=builder /build/target/enclave-service-0.1.0-SNAPSHOT.jar /app/enclave-service.jar
 
 WORKDIR /app
+RUN cp /etc/pki/tls/certs/ca-bundle.crt /app/source-ca-bundle.pem
+ENV SOURCE_CA_BUNDLE=/app/source-ca-bundle.pem
 ENTRYPOINT ["java", "-jar", "/app/enclave-service.jar"]
