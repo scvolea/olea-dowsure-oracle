@@ -1,7 +1,5 @@
 {
   "verdict": "APPROVED",
-  "findings": [
-    "Non-blocking (informational): the enclave and verifier now require rawResponseB64, but the producers that populate it (coordinator request builder, verifier evidence assembler) are out of scope for this change. Behavior is fail-closed until producers are wired to send base64(revealed recv bytes); track as a separate follow-up before end-to-end runs."
-  ],
-  "reviewDoc": "c:\\Users\\AnudeepSaiNunna\\workspace\\Kiro\\logging\\dowsure-oracle\\.worktrees\\bind-response-bytes/.agents/tasks/review-doc.md"
+  "findings": [],
+  "reviewDoc": "c:\\Users\\AnudeepSaiNunna\\workspace\\Kiro\\logging\\dowsure-oracle\\.worktrees\\wire-rawresponse/.agents/tasks/review.md"
 }
