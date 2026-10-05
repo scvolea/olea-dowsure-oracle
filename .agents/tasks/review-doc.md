@@ -1,89 +1,72 @@
-# Bind TLSNotary proof and Nitro attestation to the same raw HTTP response bytes
+# AF_VSOCK egress transport and CA bundle for the Nitro enclave
 
-This change closes a trust gap in the three-part evidence contract: previously the TLSNotary sidecar committed `response_hash` over the exact revealed recv wire bytes, but the Nitro enclave and the Olea verifier re-derived their "raw" hash from a *re-canonicalized parsed JSON object* (`sha256(canonical(rawPayload))`). Those two values could diverge whenever JSON serialization differed from the wire bytes (key ordering, whitespace, numeric formatting, duplicate keys), which would let a parsed-but-not-byte-equal payload pass as attested. The fix makes a single source of truth: the sidecar now emits the exact revealed recv bytes as STANDARD base64 (`revealed_recv_b64`), and both the enclave and the verifier now hash the *decoded* `rawResponseB64` wire bytes for the raw-payload digest. The parsed `rawPayload` object is retained only for the transform step and for storage, never for the raw hash.
+The change gives the merged TLS-in-TEE enclave a working outbound path. Inside a Nitro Enclave there is no network interface, so the previous `TcpSourceTransport` could never reach a real source host. CHANGE 1 adds `AfVsockSourceTransport`, which dials the parent instance's vsock-proxy (relay) over AF_VSOCK and lets that relay forward bytes to `host:443`. CHANGE 2 wires it into `EnclaveMain` from the environment. CHANGE 3 makes the Docker runtime stage install OS `ca-certificates` and expose them at `SOURCE_CA_BUNDLE` so TLS trust-init no longer fails with `CA_BUNDLE_NOT_FOUND`. Scope is confined to the `nitro-enclave` module plus its Dockerfile; no docs, no coordinator/verifier, no contracts touched.
 
-Watch for: the producers that populate `rawResponseB64` (coordinator request builder, verifier evidence assembler) are explicitly out of scope here (confirmed in the evidence note) — the enclave and verifier now *require and consume* the field, but wiring the producers to send `base64(revealed recv bytes)` is a separate follow-up. Until that follow-up lands, a producer that still sends canonicalized JSON would fail `TLS_PROOF_HASH_MISMATCH` / `RAW_PAYLOAD_HASH_MISMATCH` (fail-closed, which is the safe direction). (confirmed)
+Watch for: nothing blocking. The one design nuance (parse-time `RELAY_PORT_MAP_INVALID` on a malformed map entry) is a reasonable fail-closed-at-startup behavior, not a regression. (confirmed)
 
 **Verdict**: APPROVED
 
 ## High-level view
 
-The sidecar change is minimal and exact: one struct field plus one assignment, both reusing the identical `recv_bytes_revealed` slice (`&partial.received_unsafe()[..recv_end]`) that already feeds `response_hash`. Because both derive from the same slice, `sha256(base64decode(revealed_recv_b64)) === response_hash` holds by construction, with no change to the committed/revealed ranges or to how `response_hash` is computed.
+The egress design is a transparent-byte-relay: `AfVsockSourceTransport.connect(host, port)` ignores the IP route and instead opens `AFVSOCKSocket.connectTo(ofPortAndCID(resolveVsockPort(host), relayCid))` to the parent CID, returning the `AFVSOCKSocket` (which `extends Socket`) unwrapped. Because the relay just pumps bytes, the `SSLSocket` that `SourceTlsClient` layers on top still runs the handshake with endpoint-id `HTTPS` and hostname verification against `entry.host()` end-to-end — the trust boundary is unchanged. This matches the spec's requirement that vsock be a transparent relay, not a TLS terminator.
 
-The enclave now decodes `rawResponseB64` and hashes those bytes via a new `sha256Bytes(byte[])` helper, instead of hashing the canonicalized parsed object. The existing `sha256(String)` is refactored to delegate to `sha256Bytes` so no other hash site changes behavior. The `TLS_PROOF_HASH_MISMATCH` gate against `tlsProof.responseHash` is retained, the attestation `user_data` binding map keeps the exact field order {requestId, nonce, policyVersion, rawHash, transformedHash, publicKey, tlsProofHash}, and `tlsProofResponseHash` / `rawPayloadDigest` both still equal `rawHash`. The parsed `rawPayload` still drives the transform and still appears in evidence output.
+Host-to-vsock-port resolution is fail-closed: an unmapped host throws `IllegalArgumentException("RELAY_PORT_UNMAPPED")` with no TCP fallback, exactly as required. The resolution and env parsing are factored into package-private `resolveVsockPort`, `parsePortMap`, and `fromEnv` seams so they are unit-tested offline without opening a real vsock. `TcpSourceTransport` is retained untouched for local/test use.
 
-The verifier adds `rawResponseB64` to the required set and swaps its raw-payload digest check from `sha256(canonicalize(rawPayload))` to `sha256(Buffer.from(rawResponseB64,'base64'))`. The transformed-payload digest check and the `tlsProofResponseHash === rawPayloadDigest` check are untouched, so the end-to-end chain stays consistent.
-
-The scope is surgical: three production files, their tests, and the `.agents/tasks` notes. No new Rust architecture, no unrelated reformatting, and the recorded build/test evidence (Maven BUILD SUCCESS 3/3; node 28/28 including the two new base64->sha256 tests) was reviewed rather than re-run, per instruction.
+The config surface is two env vars (`SOURCE_RELAY_CID` default 3, `SOURCE_RELAY_PORT_MAP` as `host=port,...`) plus the pre-existing `SOURCE_CA_BUNDLE`. The Docker runtime stage sources the CA bundle from the OS `ca-certificates` package (deterministic, no committed PEM) and sets `SOURCE_CA_BUNDLE` to its absolute path. The inbound vsock server (CID 16 / port 5005) and the `{ok,...}` envelope are left alone and are explicitly called out as independent of the outbound transport.
 
 <details>
-<summary>Issues (1)</summary>
+<summary>Issues (0)</summary>
 
-1. **Producer wiring is a follow-up (non-blocking)** — the enclave and verifier now require `rawResponseB64`, but the components that populate it are out of scope for this change. Fail-closed until the producers are wired; track as a separate task before end-to-end runs. (confirmed, informational)
+No blocking or non-blocking actionable findings. One informational note is recorded in the details below.
 
 </details>
 
 <details>
 <summary>Details</summary>
 
-## Sidecar: one slice, two consumers
+### Transport abstraction and the preserved TLS trust boundary
 
-The revealed recv bytes are computed once and consumed by both the hash and the new base64 field:
+`AfVsockSourceTransport.connect(host, port)` (AfVsockSourceTransport.java:116-120) resolves the vsock port from `host`, then dials `AFVSOCKSocketAddress.ofPortAndCID(vsockPort, relayCid)` against the parent CID — never `host:port`. The returned `AFVSOCKSocket extends java.net.Socket`, so `SourceTlsClient.fetch` (SourceTlsClient.java:59-62) wraps it with `factory.createSocket(base, entry.host(), entry.port(), true)` and sets `setEndpointIdentificationAlgorithm("HTTPS")` exactly as before. The critical security property — the certificate hostname is verified against `entry.host()`, not against the relay CID — is preserved because the TLS layer sits above the byte relay and `SourceTlsClient` is untouched. This is the correct way to keep the relay from becoming a MITM point.
 
-```rust
-let recv_end = partial.received_authed().end();
-let recv_bytes_revealed = &partial.received_unsafe()[..recv_end];
-...
-let response_hash = sha256_hex(recv_bytes_revealed);
-...
-revealed_recv_b64: base64::engine::general_purpose::STANDARD.encode(recv_bytes_revealed),
-```
+The connect pattern mirrors the coordinator's `AfVsockTransport` (`AFVSOCKSocket.connectTo(AFVSOCKSocketAddress.ofPortAndCID(port, cid))`), so the same junixsocket API/version is used and the framing/library expectations match.
 
-`response_hash` and `revealed_recv_b64` consume the identical `recv_bytes_revealed` slice, so `sha256(base64decode(revealed_recv_b64)) === response_hash` is true by construction. The committed/revealed byte range (`[..recv_end]`), the `response_hash` computation, and `revealed_recv_preview` are all unchanged. The STANDARD engine matches the one already used for `attestation_b64`/`presentation_b64`, and the `base64::Engine` trait was already in scope, so no new imports or dependencies. This is a single struct field plus a single assignment — no new Rust architecture.
+### Fail-closed port resolution, factored for offline testing
 
-## Enclave: hash the wire bytes, keep everything else
+`resolveVsockPort` (AfVsockSourceTransport.java:98-104) throws `IllegalArgumentException("RELAY_PORT_UNMAPPED")` for any host not in the map, with no TCP fallback — the required fail-closed behavior. The map is built from `SOURCE_RELAY_PORT_MAP` by `parsePortMap` (splitting each comma-separated entry on the first `=`, trimming host/port, skipping empty entries) and the CID from `SOURCE_RELAY_CID` (default `DEFAULT_RELAY_CID = 3`). All three — `fromEnv`, `parsePortMap`, `resolveVsockPort` — are package-private and driven through injected maps, so `AfVsockSourceTransportTest` exercises them with `connect(...)` never called and no real vsock opened.
 
-```java
-byte[] rawResponseBytes = Base64.getDecoder().decode((String) request.get("rawResponseB64"));
-String rawHash = sha256Bytes(rawResponseBytes);
-if (!rawHash.equals(tlsProof.get("responseHash"))) throw new IllegalArgumentException("TLS_PROOF_HASH_MISMATCH");
-```
+Informational (not a finding): `parsePortMap` throws `RELAY_PORT_MAP_INVALID` on a malformed entry (no `=`, or empty host/port). Since `fromEnv` runs at `EnclaveMain` startup, a misconfigured map fails the process at boot rather than silently dropping an entry. The task spec only mandated the `RELAY_PORT_UNMAPPED` runtime path; this stricter startup validation is consistent with the code-as-message convention (`SOURCE_SCOPE_INVALID`, `TLS_HANDSHAKE_FAILED`, `CA_BUNDLE_NOT_FOUND`) and is a safe, intentional choice. No action needed.
 
-`rawHash` now derives from the decoded wire bytes rather than `sha256(canonical(rawPayload))`. The new `sha256Bytes(byte[])` carries the actual digest logic and the pre-existing `sha256(String)` delegates to it (UTF-8 bytes), so every other hash call site is behavior-preserving. The parsed `rawPayload` object is still used for `transform(rawPayload)` and still stored in evidence. The `TLS_PROOF_HASH_MISMATCH` check is retained verbatim, and the binding map field order {requestId, nonce, policyVersion, rawHash, transformedHash, publicKey, tlsProofHash} is confirmed unchanged (lines 51-57, outside the diff). `evidence.tlsProofResponseHash` and `evidence.rawPayloadDigest` both equal `rawHash`, so the attestation `user_data` binding changes only in the *source* of `rawHash`, not its structure.
+### No logging of host, bytes, or headers
 
-## Verifier: decoded-bytes digest, unchanged chain
+`AfVsockSourceTransport` has no logging calls at all; it holds only the CID and the host→port map and returns a socket. `SourceTlsClient` (unchanged) already documents that request/response bytes and header values are never logged. The no-secrets/no-PII/no-bytes constraint holds for the added code. (confirmed)
 
-```js
-const rawResponseBytes = Buffer.from(body.rawResponseB64, 'base64');
-if (crypto.createHash('sha256').update(rawResponseBytes).digest('hex') !== body.rawPayloadDigest) throw new Error('RAW_PAYLOAD_HASH_MISMATCH');
-```
+### EnclaveMain wiring is minimal and non-conflating
 
-`rawResponseB64` is added to the `required` list (so a missing field fails fast with `PAYLOAD_CORRUPTED`), and the raw-payload digest check hashes the decoded wire bytes instead of `sha256(canonicalize(rawPayload))`. The transformed-payload digest check (`sha256(canonicalize(transformedPayload))`) and the `tlsProofResponseHash === rawPayloadDigest` check are untouched. `crypto` was already imported at the top of the file. The result: `sha256(base64decode(rawResponseB64)) === rawPayloadDigest === tlsProofResponseHash` across all three components.
+The only functional change in `EnclaveMain.java` (lines 18-20) swaps `new SourceTransport.TcpSourceTransport()` for `AfVsockSourceTransport.fromEnv(System.getenv())` and updates the comment. `CA_BUNDLE`, `SourceRegistry`, `PocCredentialProvider`, `JnaAttestationProvider`, `SourceTlsClient`, the inbound `new VsockServer().serve(16, 5005, ...)`, and the `{"ok":true,"evidence":...}` / `{"ok":false,"error":...}` envelope are all unchanged. The comment explicitly notes the outbound egress is independent of the inbound server, matching the requirement not to conflate the two. (confirmed)
 
-## Tests lock the invariant on both sides
+### Dockerfile CA bundle — review passed
 
-The enclave test was restructured around a `request(...)` helper that supplies `rawResponseB64 = base64(rawBytes)` and derives `responseHash = service.sha256Bytes(rawBytes)`, so the proof's `responseHash` equals the enclave's `rawHash` by the new rule. The happy-path test additionally asserts `rawHash === evidence.tlsProofResponseHash`. The mismatch test deliberately sets `responseHash = "wrong"` with *valid* base64, confirming the code reaches `TLS_PROOF_HASH_MISMATCH` after `require()` passes. The new verifier test file asserts the exact `crypto.createHash('sha256').update(Buffer.from(b64,'base64'))` relation the handler uses, plus the tampered-bytes negative. These lock the behavioral contract without reaching into the AWS-backed handler path.
+The final runtime stage adds `ca-certificates` to the existing `dnf install`, then after `WORKDIR /app` runs `cp /etc/pki/tls/certs/ca-bundle.crt /app/source-ca-bundle.pem` and `ENV SOURCE_CA_BUNDLE=/app/source-ca-bundle.pem`. This prefers the OS trust store (deterministic, offline, no committed PEM) and sets the env to an absolute path, exactly as CHANGE 3 specifies. The builder stage, the `libnsm.so` and jar `COPY --from=builder`, `WORKDIR`, and `ENTRYPOINT` are untouched. The `/etc/pki/tls/certs/ca-bundle.crt` path is the correct amazonlinux:2023 location populated by the `ca-certificates` package. Dockerfile review: PASSED. (confirmed — not built here, no Docker available, but statically correct.)
 
-## Build/test evidence (reviewed, not re-run)
+### Test coverage
 
-Per instruction, the recorded evidence was read rather than re-executed. The verification note reports: enclave `mvn -pl nitro-enclave -am clean test` -> BUILD SUCCESS, `Tests run: 3, Failures: 0`; verifier `node --test` -> tests 28, pass 28, fail 0 (including the two new tests). The sidecar had no `cargo` on PATH, so it was manually reviewed; the slice-reuse argument above independently confirms invariant 1 holds regardless of a compile. The evidence is present and specific, so no suite re-run and no rejection-for-missing-evidence applies.
+`AfVsockSourceTransportTest` (8 tests, all offline) covers mapped-host resolution, the `RELAY_PORT_UNMAPPED` fail-closed path, `parsePortMap` whitespace trimming and trailing/double-comma skipping, null/blank → empty map, and `fromEnv` default-CID / explicit-CID / empty-env wiring. The required mapping + fail-closed tests are present and pass per the report (enclave module 27 tests, full reactor enclave 27 + coordinator 18, all green).
 
-## Scope and secrets
+Not tested: the actual `connect(...)` vsock dial (correctly out of scope — can't open a real vsock offline, and the junixsocket call is thin); the Dockerfile build (no Docker in the environment). Both omissions are expected and acceptable for this change.
 
-Changed files: the three production files, their test files, and `.agents/tasks/{plan.md, verification-note.md}` — within the stated scope. No unrelated reformatting appears in any diff hunk. No new logging statements were added, so no secrets/tokens/payloads/PII enter logs. No live-infra commands are present in the diff or evidence (the note explicitly records that no live notarization and no `cargo build` were run).
+The pasted test evidence in `vsock-egress-report.md` is complete and consistent with the diff (8 new tests named match the test file), so no re-run was required.
 
 </details>
 
 <details>
 <summary>File map</summary>
 
-- `tls-notary/prover-sidecar/src/main.rs` — add `revealed_recv_b64` struct field + assignment from the existing revealed recv slice.
-- `nitro-enclave/.../EnclaveService.java` — require `rawResponseB64`; `rawHash` = sha256 of decoded bytes via new `sha256Bytes`; `sha256(String)` delegates to it.
-- `nitro-enclave/.../EnclaveServiceTest.java` — `request(...)` helper supplies `rawResponseB64`; asserts `rawHash === tlsProofResponseHash`; mismatch test uses valid base64.
-- `sam/olea/functions/verification/index.js` — require `rawResponseB64`; raw-payload digest hashes decoded wire bytes.
-- `sam/olea/functions/verification/index.test.js` — new; locks base64->sha256 invariant + tampered negative.
-- `.agents/tasks/plan.md`, `.agents/tasks/verification-note.md` — task notes/evidence.
+- `nitro-enclave/src/main/java/com/olea/dowsure/enclave/AfVsockSourceTransport.java` — new production transport: vsock dial to parent relay, fail-closed port resolution.
+- `nitro-enclave/src/main/java/com/olea/dowsure/enclave/EnclaveMain.java` — swap TCP transport for `AfVsockSourceTransport.fromEnv(...)`; comment updated.
+- `nitro-enclave/Dockerfile` — install `ca-certificates`, copy to `/app/source-ca-bundle.pem`, set `SOURCE_CA_BUNDLE`.
+- `nitro-enclave/src/test/java/com/olea/dowsure/enclave/AfVsockSourceTransportTest.java` — new offline tests for mapping + fail-closed path.
+- `.agents/tasks/vsock-egress-plan.md`, `.agents/tasks/vsock-egress-report.md` — task artifacts (not production).
 
-Full diff: `git -C <worktree> diff main...bind-response-bytes`
+Full diff: `git -C <worktree> diff main...vsock-egress`.
 
 </details>
