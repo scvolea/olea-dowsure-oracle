@@ -1,6 +1,7 @@
 package com.olea.dowsure.enclave;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
@@ -16,33 +17,39 @@ import java.util.Map;
 import java.util.TreeMap;
 
 public final class EnclaveService {
-    private static final String SOURCE = "mock-api";
-    private static final String ENDPOINT = "GET_ORDERS";
     private static final String CANONICALIZATION = "RFC8785-PoC";
 
     private final ObjectMapper mapper;
     private final AttestationProvider attestationProvider;
+    private final SourceTlsClient sourceTlsClient;
+    private final CredentialProvider credentialProvider;
+    private final SourceRegistry sourceRegistry;
 
-    public EnclaveService(ObjectMapper mapper, AttestationProvider attestationProvider) {
+    public EnclaveService(ObjectMapper mapper,
+                          AttestationProvider attestationProvider,
+                          SourceTlsClient sourceTlsClient,
+                          CredentialProvider credentialProvider,
+                          SourceRegistry sourceRegistry) {
         this.mapper = mapper;
         this.attestationProvider = attestationProvider;
+        this.sourceTlsClient = sourceTlsClient;
+        this.credentialProvider = credentialProvider;
+        this.sourceRegistry = sourceRegistry;
     }
 
     public Map<String, Object> acquire(Map<String, Object> request) {
-        require(request, "requestId", "nonce", "policyVersion", "evidenceId", "eifDigest", "rawPayload", "rawResponseB64", "tlsProof");
-        if (!SOURCE.equals(request.get("source")) || !ENDPOINT.equals(request.get("endpoint"))) throw new IllegalArgumentException("SOURCE_SCOPE_INVALID");
+        require(request, "requestId", "nonce", "policyVersion", "evidenceId", "eifDigest", "sourceId");
 
-        Map<String, Object> rawPayload = map(request.get("rawPayload"), "rawPayload");
-        Map<String, Object> tlsProof = map(request.get("tlsProof"), "tlsProof");
-        if (!"tlsnotary".equals(tlsProof.get("proofType"))) throw new IllegalArgumentException("TLS_PROOF_INVALID");
-        Map<String, Object> proofMaterial = new TreeMap<>(tlsProof);
-        proofMaterial.remove("proofHash");
-        if (!sha256(canonical(proofMaterial)).equals(tlsProof.get("proofHash"))) throw new IllegalArgumentException("TLS_PROOF_INVALID");
-
-        byte[] rawResponseBytes = Base64.getDecoder().decode((String) request.get("rawResponseB64"));
+        String sourceId = (String) request.get("sourceId");
+        SourceEntry entry = sourceRegistry.resolve(sourceId);
+        Map<String, String> headers = credentialProvider.headersFor(entry, request);
+        byte[] rawResponseBytes = sourceTlsClient.fetch(entry, request.get("requestBody"), headers);
+        String rawResponseB64 = Base64.getEncoder().encodeToString(rawResponseBytes);
         String rawHash = sha256Bytes(rawResponseBytes);
-        if (!rawHash.equals(tlsProof.get("responseHash"))) throw new IllegalArgumentException("TLS_PROOF_HASH_MISMATCH");
-        Map<String, Object> transformed = transform(rawPayload);
+        Map<String, Object> rawPayload = parseBody(rawResponseBytes);
+
+        // PURE PASS-THROUGH transform: the raw payload is echoed as-is, no logic.
+        Map<String, Object> transformed = rawPayload;
         String transformedHash = sha256(canonical(transformed));
 
         KeyPair keyPair = generateKeyPair();
@@ -51,22 +58,19 @@ public final class EnclaveService {
         binding.put("requestId", request.get("requestId"));
         binding.put("nonce", request.get("nonce"));
         binding.put("policyVersion", request.get("policyVersion"));
+        binding.put("sourceId", sourceId);
         binding.put("rawHash", rawHash);
         binding.put("transformedHash", transformedHash);
         binding.put("publicKey", publicKey);
-        binding.put("tlsProofHash", tlsProof.get("proofHash"));
 
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("requestId", request.get("requestId"));
         manifest.put("evidenceId", request.get("evidenceId"));
-        manifest.put("source", SOURCE);
-        manifest.put("endpoint", ENDPOINT);
+        manifest.put("sourceId", sourceId);
         manifest.put("nonce", request.get("nonce"));
         manifest.put("policyVersion", request.get("policyVersion"));
         manifest.put("rawSourceHash", rawHash);
         manifest.put("transformedHash", transformedHash);
-        manifest.put("tlsProofType", "tlsnotary");
-        manifest.put("tlsProofHash", tlsProof.get("proofHash"));
         manifest.put("canonicalizationVersion", CANONICALIZATION);
         manifest.put("attestedPublicKeyBase64", publicKey);
 
@@ -74,13 +78,10 @@ public final class EnclaveService {
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("rawPayload", rawPayload);
         evidence.put("rawPayloadDigest", rawHash);
-        evidence.put("rawResponseB64", request.get("rawResponseB64"));
+        evidence.put("rawResponseB64", rawResponseB64);
         evidence.put("transformedPayload", transformed);
         evidence.put("transformedPayloadDigest", transformedHash);
         evidence.put("canonicalizationVersion", CANONICALIZATION);
-        evidence.put("tlsProofType", "tlsnotary");
-        evidence.put("tlsProofHash", tlsProof.get("proofHash"));
-        evidence.put("tlsProofResponseHash", rawHash);
         evidence.put("attestedPublicKeyBase64", publicKey);
         evidence.put("manifestDigest", manifestDigest);
         evidence.put("encryptedEvidenceReference", "vsock://opaque/" + request.get("evidenceId"));
@@ -91,10 +92,21 @@ public final class EnclaveService {
         return evidence;
     }
 
-    private Map<String, Object> transform(Map<String, Object> rawPayload) {
-        Object payload = rawPayload.get("payload");
-        Map<String, Object> payloadMap = payload instanceof Map<?, ?> value ? castMap(value) : Map.of();
-        return Map.of("orders", payloadMap.getOrDefault("Orders", java.util.List.of()));
+    /**
+     * Parse the JSON body out of the full HTTP response bytes R (status line +
+     * headers + body). Used only to carry the parsed payload for pass-through; the
+     * binding/hash is always over the exact wire bytes R.
+     */
+    private Map<String, Object> parseBody(byte[] response) {
+        try {
+            String text = new String(response, StandardCharsets.UTF_8);
+            int split = text.indexOf("\r\n\r\n");
+            String body = split >= 0 ? text.substring(split + 4) : text;
+            return mapper.readValue(body, new TypeReference<Map<String, Object>>() {
+            });
+        } catch (Exception error) {
+            throw new IllegalArgumentException("SOURCE_RESPONSE_INVALID", error);
+        }
     }
 
     private KeyPair generateKeyPair() {
@@ -145,16 +157,5 @@ public final class EnclaveService {
 
     private static void require(Map<String, Object> request, String... fields) {
         for (String field : fields) if (!request.containsKey(field) || request.get(field) == null) throw new IllegalArgumentException("REQUEST_FIELD_MISSING:" + field);
-    }
-
-    private static Map<String, Object> map(Object value, String field) {
-        if (!(value instanceof Map<?, ?> map)) throw new IllegalArgumentException("REQUEST_FIELD_INVALID:" + field);
-        return castMap(map);
-    }
-
-    private static Map<String, Object> castMap(Map<?, ?> value) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        value.forEach((key, item) -> result.put(String.valueOf(key), item));
-        return result;
     }
 }
