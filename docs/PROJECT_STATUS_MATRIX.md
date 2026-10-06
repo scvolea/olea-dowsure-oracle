@@ -1,112 +1,119 @@
 # Project status matrix
 
-> **Read this first (plain English).** This project proves that a tamper-proof
-> computer-in-a-box (an AWS Nitro Enclave) can fetch data, transform it, and sign
-> a cryptographic receipt that Olea can verify. That trusted-execution and
-> attestation layer is built and verified against live AWS evidence. What is NOT
-> yet done is the *source-authenticity* layer: a real TLSNotary proof that the
-> fetched data truly came from Amazon. This page is the single place that records
-> the hard facts (the enclave fingerprints, host, and verified IDs). Every other
-> document links here instead of repeating these numbers, so there is exactly one
-> source of truth.
+> **Read this first (plain English).** This project proves that Olea can accept
+> "Amazon says this seller did X" from Dowsure WITHOUT trusting Dowsure. The
+> oracle uses **TLS-in-TEE**: the Nitro enclave opens and terminates the TLS
+> connection to each upstream source itself — the host is a transparent
+> vsock→TCP byte relay that only sees ciphertext. There is no external notary
+> on the live path. Trust is derived from the enclave's own attestation:
+> challenge nonce + PCR0/1/2 (EIF measurement) + attestation document +
+> rawHash + transformedHash + enclave signature. **7 source calls have been
+> proven live, each returning 202 ACCEPTED** via the custom domain
+> `oracle.oleainternal.com`. This page records the hard facts; other docs
+> link here.
 
-This matrix is the **single source of truth** for status facts about the
-Olea-Dowsure verifiable data oracle Proof of Concept (PoC). If any other document
-disagrees with this page, this page is correct.
+> **Freshness:** this page was refreshed after the TLS-in-TEE conversion was
+> proven end-to-end. Code is at `main` HEAD `838a170`, merged across 5 workflow
+> cycles. The previous approach (MPC-TLS / TLSNotary with an external notary)
+> is superseded — the notary code is kept in the repo as historical reference
+> only. For the full narrative see `SESSION_HANDOFF.md`.
 
-## Acronyms used on this page (expanded on first use)
+This matrix is the **single source of truth** for status facts. If any other
+document disagrees, this page is correct.
 
-- **Nitro Enclave** - an isolated, tamper-proof virtual machine inside an AWS EC2
-  host with no persistent storage, no interactive access, and no external network
-  except a virtual socket to its parent host.
-- **EIF (Enclave Image File)** - the single built artifact that boots inside the
-  enclave. Its SHA-256 hash is the enclave's identity.
-- **PCR (Platform Configuration Register)** - a measurement (hash) of what was
-  loaded into the enclave. PCR0/PCR1/PCR2 together fingerprint the exact EIF.
-- **attestation** - a signed document the enclave produces that proves which EIF
-  (via its PCRs) is running and binds a public key to that enclave.
-- **NSM (Nitro Security Module)** - the hardware component that signs the
-  attestation document.
-- **COSE (CBOR Object Signing and Encryption)** - the signature format of the
-  attestation document.
-- **CBOR (Concise Binary Object Representation)** - the compact binary encoding
-  that COSE uses.
-- **TLSNotary** - a protocol that produces a proof that a specific HTTPS response
-  really came from a specific server, without trusting the client.
-- **vsock (virtual socket / AF_VSOCK)** - the only communication channel between
-  the enclave and its parent host.
-- **SP-API (Selling Partner API)** - Amazon's seller data API.
+## Acronyms
+
+- **TLS-in-TEE** — the enclave opens and terminates its own TLS connection to the
+  upstream source; the host is a transparent vsock→TCP byte relay carrying only
+  ciphertext. No external notary is involved.
+- **Nitro Enclave** — isolated, tamper-proof VM inside an EC2 host; no persistent
+  storage, no interactive access, no network except a virtual socket (vsock) to its host.
+- **EIF (Enclave Image File)** — the single artifact that boots inside the enclave; its SHA-256 is its identity.
+- **PCR (Platform Configuration Register)** — a measurement (hash) of what loaded into the enclave; PCR0/1/2 fingerprint the exact EIF.
+- **attestation** — a signed document the enclave produces proving which EIF (PCRs) runs and binding a public key.
+- **NSM (Nitro Security Module)** — the hardware that signs the attestation. **COSE/CBOR** — the attestation's signature format/encoding.
+- **MPC-TLS / TLSNotary** — the previous approach (now historical reference): a protocol producing a proof that a specific HTTPS response really came from a specific server, using a separate prover + independent notary who jointly run the TLS client.
+- **vsock (AF_VSOCK)** — the only channel between the enclave and its host.
+- **SP-API (Selling Partner API)** — Amazon's seller data API. **LWA** — Login with Amazon (OAuth token).
 
 ## Status table
 
 | Area | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Nitro host / EC2 environment | Verified | Host `i-0b2b6aa26fb920103` is live and SSM-managed | See verified facts below |
-| Java enclave runtime | Verified | `olea-orders-java` running non-debug (Flags: NONE) | AF_VSOCK (virtual socket) port 5005 |
-| EIF (Enclave Image File) generation | Verified | phase4 EIF built and measured | SHA-256 recorded below |
-| AWS Nitro attestation | Verified | Attestation document produced by the NSM (Nitro Security Module) | Verified against AWS Nitro Root-G1 |
-| COSE (CBOR Object Signing and Encryption) signature validation | Verified | Certificate and signature chain validated | CBOR (Concise Binary Object Representation) encoded |
-| PCR (Platform Configuration Register) validation | Verified | PCR0, PCR1, PCR2 match the approved baseline | Fail-closed enforcement |
-| Public key binding | Verified | Attested public key matches expected binding | Included in `user_data` checks |
-| `user_data` canonicalization | Verified | Canonicalized binding accepted | JSON canonicalization + hash binding passed |
-| EIF release registration | Verified | Exact EIF SHA-256 registered ACTIVE | Preprod Olea release registry |
-| vsock (virtual socket) communication | Verified | Java AF_VSOCK path is live | Port 5005 |
-| Implemented upstream source flow | Verified | Bounded mock `GET_ORDERS` path works | Enclave code hardcodes `source='mock-api'`, `endpoint='GET_ORDERS'` |
-| Real TLSNotary proof integration | Open (blocked) | Enclave runs a TLSNotary hash-contract **placeholder** only | **Critical open gate** - no real signed proof from an approved notary yet |
-| Amazon SP-API (Selling Partner API) sandbox | Available | Sandbox endpoints and credentials are now available for validation | Credentials provided out of band / stored as secrets; never written in any doc |
-| Finances-endpoint reorientation | Planned (next) | Transactions + Financial Event Groups supersede order-metrics-only | `GET /finances/2024-06-19/transactions` and `GET /finances/v0/financialEventGroups` are the real next targets |
-| KYC (Know Your Customer) / judicial checks | Planned (Phase 2) | New Phase-2 TLS+TEE consumer, confirmed by both teams | Schema/flow + decision model only; no code integration yet |
-| Full Olea acceptance receipt (end-to-end) | Open | Acceptance flow is not complete end-to-end | Evidence package not yet accepted through the live coordinator path |
-| Coordinator integration | Open | Transitional fixture path still in place | Coordinator must replace the API Gateway parent fixture |
-| Production Amazon onboarding | Out of scope | Explicitly deferred | Phase 2 work only |
+| Nitro host / EC2 environment | Verified | Host `i-0b2b6aa26fb920103` live, SSM-managed | preprod, stack `olea-dowsure-nitro-preprod` |
+| Java enclave runtime | Verified | `olea-orders-tlsintee-f` RUNNING non-debug (Flags: NONE) | AF_VSOCK CID 16 |
+| EIF generation | Verified | Rebuilt no-cache from merged code; measured | SHA-256 + PCRs below |
+| AWS Nitro attestation | Verified | Attestation produced by NSM, verified vs AWS Nitro Root-G1 | COSE sig + cert chain + PCR0/1/2 + public key + user_data |
+| PCR validation | Verified | PCR0/1/2 match approved baseline | fail-closed |
+| EIF release registration | Verified | EIF registered ACTIVE with dowsurePublicKeyPem | label `tls-in-tee-framing` |
+| vsock communication | Verified | Java AF_VSOCK path live, 4-byte big-endian length-prefix framing | CID 16 |
+| Coordinator (Java) | Verified | Driven by `--source-id`; no `--raw-payload-file`, `--raw-response-b64-file`, `--tls-proof-file` | runs on host for vsock |
+| **TLS-in-TEE (enclave terminates TLS itself)** | **Verified (live, 7×202)** | Enclave opens its own TLS connection to each source via vsock→TCP relay; host sees only ciphertext | SUPERSEDES the MPC-TLS/notary approach |
+| Source registry (7 entries) | Verified | getOrderMetrics, listFinancialEventGroups, listTransactions, alicloudTelThree, qichachaEnterpriseVerify, qichachaShixinCheck, gutuPanoramaChecks | all 7 proven live |
+| **Full Olea acceptance (202) end-to-end** | **DONE — 7×202 ACCEPTED** | See evidence IDs below | via `oracle.oleainternal.com` custom domain |
+| Custom domain DNS bypass | Verified | `oracle.oleainternal.com` → `d-qbnfey8xcc.execute-api.ap-southeast-1.amazonaws.com` | bypasses VPC execute-api VPCE private-DNS interception |
+| MPC-TLS / TLSNotary (previous approach) | Historical reference | Code in repo (`tls-notary/`); no longer on the live path | superseded by TLS-in-TEE |
+| Finances-endpoint reorientation | Verified (live) | listTransactions + listFinancialEventGroups proven as part of the 7 calls | |
+| KYC / judicial checks | Verified (live) | alicloudTelThree, qichachaEnterpriseVerify, qichachaShixinCheck, gutuPanoramaChecks proven live | 4 calls, 202 ACCEPTED each |
+| Super PO / Financing / Repayment | Planned | documented; not built | Repayment REQUIRES TLS-in-TEE |
+| Production Amazon onboarding | Out of scope | deferred | |
 
-## Verified facts (defined here, linked everywhere else)
+## Verified facts (authoritative — copy from here)
 
-These are the authoritative hard facts. Copy them from here; do not restate them
-in other documents.
-
-- **Nitro host:** `i-0b2b6aa26fb920103` (c5.xlarge, private subnet, SSM-managed,
-  no SSH); stack `olea-dowsure-nitro-preprod`.
-- **Enclave:** `olea-orders-java`, CID 16, 2 vCPU, 2048 MiB, phase4 EIF
-  (Enclave Image File) RUNNING, non-debug (Flags: NONE), Java AF_VSOCK
-  (virtual socket) port 5005.
-- **phase4 EIF SHA-256:** `246e2143aeecb6c2e4f5e551536b2dfc75e8313fd521dd4da91da8f5d907da94`
-  - registered ACTIVE in the preprod Olea release registry.
-- **PCR0:** `5fba63399c819c8658452d9d48f35ecd491f9d65d5d842eb7ada4ae23a63cb666796a643102c9cc9e71c8a4bc60baba9`
+- **Nitro host:** `i-0b2b6aa26fb920103` (private subnet, SSM-managed, no SSH); stack `olea-dowsure-nitro-preprod`; artifact bucket `olea-dowsure-nitro-preprod-artifactbucket-vjb1iirzgmrc`.
+- **Enclave (current):** `olea-orders-tlsintee-f`, CID 16, RUNNING non-debug (Flags: NONE).
+- **EIF SHA-256:** `a837d6739cae6e45ba9785e0991099d85764ecdd7831a99fc7310d05aa930444`
+- **PCR0:** `c5e703f0600254a7e677dde011d62eb48357179f811cb508bf4718c2ff73ed0daa1d1b245999d5cda096b8fb5e5da3de`
 - **PCR1:** `4b4d5b3661b3efc12920900c80e126e4ce783c522de6c02a2a5bf7af3a2b9327b86776f188e4be1c1c404a129dbda493`
-- **PCR2:** `6560ff543ea448942b3f50ebadf606223a7aed1120856b503468a127671b22de6cbf195e0beb423b255100349e22c68f`
-- **Live non-debug attestation** verified against AWS Nitro Root-G1: COSE
-  (CBOR Object Signing and Encryption) signature, certificate chain, PCR0/1/2,
-  attested public key, and canonicalized `user_data`.
-- **Verified request:** `293548c9-9975-4cc0-9039-b19a5ce6b421` /
-  **evidence:** `e826e531-cbc6-41ed-93d5-1da3ae68fe09`.
-- **Stacks:** `olea-oracle-preprod` and `dowsure-oracle-preprod` are
-  UPDATE_COMPLETE (plus `olea-dowsure-nitro-preprod` above).
-- **Jira:** DEVOPS-1816 plus 1817 / 1818 / 1819 are Done for the attestation and
-  approved-PCR release-gate scope.
+- **PCR2:** `9ab33673b0ca95c7e9c305e6d70d8ea2adbe5544fd4ef6695d5498af7059c40eb0d9ed5435c5e080729c60525d20de1a`
+- **Release label:** `tls-in-tee-framing`, status ACTIVE, with dowsurePublicKeyPem.
+- **Olea API (custom domain):** `https://oracle.oleainternal.com` — mapped to preprod stage of `olea-oracle-preprod` (`c8tw99zmla`). Cert: `*.oleainternal.com` (1c4f63f9). DNS alias in `oleainternal.com` private zone (Z04211121HBN9ZJWI8ZW1).
+- **Olea API (regional):** `https://c8tw99zmla.execute-api.ap-southeast-1.amazonaws.com/preprod` (reachable from outside the VPC only).
+- **Custom domain mapping:** `oracle.oleainternal.com` → `d-qbnfey8xcc.execute-api.ap-southeast-1.amazonaws.com`.
+- **7 live 202 ACCEPTED evidence IDs:**
+  - `getOrderMetrics` → `7e7e04ee`
+  - `listFinancialEventGroups` → `3b785acc`
+  - `listTransactions` → `b0105642`
+  - `alicloudTelThree` → `d07f6de7`
+  - `qichachaEnterpriseVerify` → `ac87b0ba`
+  - `qichachaShixinCheck` → `e8c25235`
+  - `gutuPanoramaChecks` → `71da25ed`
+- **vsock framing:** 4-byte big-endian length-prefix (no half-close/shutdownOutput).
+- **user_data binding:** `{requestId, nonce, policyVersion, sourceId, rawHash, transformedHash, publicKey}` — NO `tlsProofHash`.
+- **Manifest fields:** no `tlsProofType`/`tlsProofHash`; uses `sourceId` instead of `source`/`endpoint`.
+- **Transform:** pure pass-through (transformed = rawPayload, no logic).
+- **Coordinator:** driven by `--source-id` (no `--raw-payload-file`, `--raw-response-b64-file`, `--tls-proof-file`).
+- **Accounts:** preprod `706179786846`, dev `855703743734`. Region `ap-southeast-1`.
+- **Code:** `main` at `838a170`, merged across 5 workflow cycles.
+
+## Code defects found and fixed
+
+1. Missing vsock egress transport + CA bundle (`96312ed`).
+2. VsockServer crash on bad connection (`fc0cfc9`).
+3. AF_VSOCK half-close framing → 4-byte big-endian length-prefix (`838a170`).
+
+## Infrastructure findings
+
+1. Nitro enclaves get no runtime env injection → config is baked. Production hardening: KMS → Secrets Manager.
+2. Verifier Lambda drift from CloudFormation (`update-function-code`; `sam deploy` pending).
+3. VPC `execute-api` VPCE private-DNS interception: the shared preprod VPC's VPCE intercepts all `*.execute-api.*` resolution, routing traffic through the VPCE path. Regional API Gateway rejects traffic arriving via the VPCE.
+4. Custom domain `oracle.oleainternal.com` resolved it: Route 53 alias in the `oleainternal.com` private hosted zone bypasses the VPCE private-DNS interception.
 
 ## Plain-English summary
 
-The project is successfully proving the trusted-execution and attestation
-architecture: a real Nitro Enclave boots a measured EIF, produces a genuine
-attestation document, and Olea verifies it against AWS trust material. It is
-**not** yet proving real source authenticity, because the TLSNotary proof is still
-a placeholder (the code only checks a proof contract and a response hash, not a
-real signed proof from an approved notary).
-
-The Amazon SP-API sandbox and its credentials are now available, so the next slice
-can exercise the real sandbox (Transactions, Financial Event Groups, Order
-Metrics) through the enclave instead of the local mock.
+The TLS-in-TEE implementation has been deployed and validated end-to-end. The
+Nitro enclave opens and terminates its own TLS connection to each upstream source;
+the host is a transparent byte relay. All 7 source calls (3 Amazon SP-API +
+4 KYC vendors) have been proven live with 202 ACCEPTED. The previous MPC-TLS /
+TLSNotary approach is kept as historical reference; TLS-in-TEE supersedes it
+by collapsing source authenticity and execution trust into a single boundary.
+KYC is proven live (not mock-only). Super PO / Repayment are planned (Repayment
+is the flow that genuinely requires TLS-in-TEE).
 
 ## Decision statement
 
-The current honest position is:
-
-- the enclave and attestation path is real and validated,
-- the trust model is working for the controlled PoC,
-- the real TLSNotary source-proof layer is still an open gate (placeholder only),
-- the Amazon SP-API sandbox is available (not blocked) for the next integration slice.
-
-Describe this project as a real attestation PoC with an open source-proof gate and
-an available sandbox for the next slice - not as a completed Amazon-origin
-verification deployment.
+Describe this project as: **a proven TLS-in-TEE verifiable oracle — the Nitro
+enclave terminates TLS itself, producing attested evidence for 7 source calls
+(3 Amazon SP-API + 4 KYC), all 7 returning 202 ACCEPTED. The MPC-TLS/notary
+approach is historical reference; TLS-in-TEE is the live path.** Code is at
+`main` `838a170`.

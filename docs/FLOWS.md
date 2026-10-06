@@ -5,20 +5,24 @@
 > with a diagram and a numbered step list for each. Every part is tagged so you
 > always know what is real today versus what is planned. There are five flows:
 > (1) a seller joins (Shop Onboarding), (2) a seller borrows against orders
-> (Super PO), (3) the loan is repaid (Repayment - and why it must run inside a
+> (Super PO), (3) the loan is repaid (Repayment — and why it must run inside a
 > tamper-proof enclave), (4) the trust machinery that signs a verifiable receipt
-> (TLS+TEE attestation), and (5) checking who the borrower is (KYC). For the hard
-> status facts (enclave fingerprints, host, verified IDs) see the
+> (TLS-in-TEE attestation — the enclave terminates TLS itself), and (5) checking
+> who the borrower is (KYC). All 7 source calls (3 Amazon SP-API + 4 KYC) have
+> been proven live with 202 ACCEPTED. For the hard status facts (enclave
+> fingerprints, host, verified IDs, evidence IDs) see the
 > [project status matrix](./PROJECT_STATUS_MATRIX.md); this page links there rather
 > than repeating those numbers. For where the data comes from, see
 > [source endpoints](./SOURCE_ENDPOINTS.md).
 
 **Cross-check note.** Every flow on this page was traced against the actual code
-(`coordinator/coordinator.py`, `nitro-enclave/.../EnclaveMain.java`,
+(`coordinator/.../Coordinator.java`, `nitro-enclave/.../EnclaveMain.java`,
 `nitro-enclave/.../EnclaveService.java`) and the integration references. The
-authoritative technical anchors are: **CID 16**, **port 5005**, the **phase4 EIF
-(Enclave Image File)**, and the **placeholder TLSNotary** check. If prose and code
-ever disagree, the code wins and this page is wrong.
+authoritative technical anchors are: **CID 16**, the **current EIF
+(Enclave Image File)**, and **TLS-in-TEE** — the enclave opens and terminates its
+own TLS connection to each source (the external MPC-TLS/TLSNotary approach is now
+historical reference, off the live path). If prose and code ever disagree, the
+code wins and this page is wrong.
 
 ## Legend
 
@@ -42,8 +46,12 @@ ever disagree, the code wins and this page is wrong.
   attestation document.
 - **CBOR (Concise Binary Object Representation)** - the compact binary encoding
   COSE uses.
-- **TLSNotary** - a protocol producing a proof that a specific HTTPS response
-  really came from a specific server, without trusting the client.
+- **TLS-in-TEE** - the enclave opens and terminates its own TLS connection to
+  the upstream source; the host is a transparent vsock→TCP byte relay carrying
+  only ciphertext. No external notary is involved.
+- **TLSNotary / MPC-TLS** - the previous approach (now historical reference): a
+  protocol producing a proof that a specific HTTPS response really came from a
+  specific server, using a separate prover + independent notary.
 - **TEE (Trusted Execution Environment)** - a protected area (here, the Nitro
   Enclave) where code and data cannot be read or tampered with from outside.
 - **vsock (virtual socket / AF_VSOCK)** - the only communication channel between
@@ -88,9 +96,9 @@ flowchart LR
    Amazon SP-API sandbox and its credentials are available (see
    [status matrix](./PROJECT_STATUS_MATRIX.md)). This is no longer blocked.
 
-**Status:** the Order Metrics probe path is **IMPLEMENTED** (as the mock
-`GET_ORDERS` path); Financial Event Groups wiring is **PLANNED**; live sandbox
-validation is now **possible** (the sandbox is available, not blocked).
+**Status:** the Order Metrics probe path is **IMPLEMENTED** and proven live
+(202 ACCEPTED, evidenceId `7e7e04ee`); Financial Event Groups is proven live
+(202 ACCEPTED, evidenceId `3b785acc`); live sandbox validation is **done**.
 
 **Open questions:**
 
@@ -196,65 +204,93 @@ this repository.
 
 ---
 
-## Flow (4): TLS+TEE / Nitro attestation trust flow
+## Flow (4): TLS-in-TEE / Nitro attestation trust flow
 
 **What it is:** the machinery that turns "we fetched some data" into "here is a
-cryptographic receipt Olea can verify." This is the part that is actually built and
-verified today.
+cryptographic receipt Olea can verify." The enclave terminates TLS itself — source
+authenticity and execution trust are collapsed into a single enclave boundary. The
+previous MPC-TLS/TLSNotary approach (external notary + prover sidecar) is historical
+reference only, off the live path.
 
 ```mermaid
-flowchart LR
-    SRC["Approved source endpoint"] --> TLS["TLSNotary proof<br/>MPC-TLS, Olea-pinned notary key"]
-    TLS --> CO["Dowsure coordinator<br/>defaults CID 16 / port 5005"]
-    CO -->|vsock| EN["Java enclave<br/>EnclaveMain serves CID 16 / port 5005<br/>source=mock-api endpoint=GET_ORDERS"]
-    EN --> RH["rawHash = SHA256(decode(rawResponseB64))<br/>gate: rawHash == tlsProof.responseHash"]
-    EN --> TF["Deterministic transform"]
-    TF --> TH["Transformed hash"]
-    EN --> KP["Ephemeral P-256 key"]
-    KP --> AT["Nitro attestation via NSM"]
-    AT --> V["Olea verify: COSE, cert chain, PCR0/1/2,<br/>attested public key, canonical user_data vs AWS Nitro Root-G1"]
-    V --> EV["Evidence vault / receipt"]
+flowchart TB
+    subgraph OLEA["Olea control plane"]
+        CH["Challenge API\nPOST /v1/challenges"]
+        VER["Verifier Lambda\nPOST /v1/evidence"]
+        REL[("Release registry\neifDigest + PCR0/1/2")]
+        VAULT[("Evidence vault\nS3 Object-Lock")]
+    end
+    subgraph DOW["Dowsure Nitro EC2 host"]
+        COORD["Coordinator (Java)\n--source-id"]
+        RELAY["vsock→TCP relay\n(ciphertext only)"]
+        subgraph ENC["Nitro Enclave (sealed, measured EIF)"]
+            REG["SourceRegistry\n7 entries"]
+            TLS["SourceTlsClient\nterminates TLS"]
+            SVC["EnclaveService\nrawHash + attest + sign"]
+            NSM["NSM attestation"]
+        end
+    end
+    subgraph SRC["Upstream sources"]
+        AMZ["Amazon SP-API\n3 calls"]
+        KYC["KYC vendors\n4 calls"]
+    end
+    COORD -->|"1 challenge"| CH
+    CH -->|"nonce"| COORD
+    COORD -->|"2 vsock: sourceId"| SVC
+    SVC --> REG
+    SVC --> TLS
+    TLS -->|"3 TLS over vsock"| RELAY
+    RELAY -->|"ciphertext"| AMZ
+    RELAY -->|"ciphertext"| KYC
+    SVC --> NSM
+    SVC -->|"4 evidence"| COORD
+    COORD -->|"5 POST /v1/evidence"| VER
+    VER --> REL
+    VER -->|"202→vault"| VAULT
 ```
 
 **Steps:**
 
-1. A request targets an approved source endpoint. In the code the enclave hardcodes
-   `source='mock-api'` and `endpoint='GET_ORDERS'`, and rejects anything else with
-   `SOURCE_SCOPE_INVALID`. **[IMPLEMENTED - bounded mock scope]**
-2. A **TLSNotary** proof is supplied. In the code this is a **PLACEHOLDER**: the
-   enclave checks `tlsProof.proofType == 'tlsnotary'`, recomputes `proofHash` over
-   the proof material, and requires `responseHash == rawHash`. It is a
-   proof-*contract* and response-hash check that **fails closed** - it is **NOT** a
-   real signed TLSNotary proof from an approved notary. **[PLACEHOLDER]**
-3. The **Dowsure coordinator** (`coordinator.py`) obtains a challenge/nonce, then
-   invokes the enclave. It defaults to `--enclave-cid 16` and `--enclave-port
-   5005`. **[IMPLEMENTED]**
-4. The coordinator reaches the enclave over **vsock (virtual socket / AF_VSOCK)**.
-   `EnclaveMain` serves on **CID 16, port 5005**. **[IMPLEMENTED]**
-5. The enclave computes the **raw-source hash** over the canonicalized payload.
+1. The Coordinator (Java, `Coordinator.java`, driven by `--source-id`) obtains a
+   **challenge nonce** from Olea (`POST /v1/challenges`, scoped by `sourceId`).
+   **[IMPLEMENTED — proven live, 7 sources]**
+2. The Coordinator sends `{sourceId, nonce, eifDigest}` to the **enclave** over
+   vsock (4-byte big-endian length-prefix framing). **[IMPLEMENTED]**
+3. Inside the enclave, the **SourceRegistry** resolves the `sourceId` to a host,
+   path, and headers. **[IMPLEMENTED — 7 entries]**
+4. The **SourceTlsClient** opens and terminates a TLS connection to the upstream
+   source. The connection is routed through the host's **vsock→TCP relay**, which
+   forwards raw ciphertext bytes without inspecting or modifying them. The host
+   never sees plaintext. **[IMPLEMENTED]**
+5. The enclave receives the plaintext response `R`, computes
+   `rawHash = SHA256(R)`, and runs the **transform** (currently pass-through).
    **[IMPLEMENTED]**
-6. The enclave runs a **deterministic transform** and computes the **transformed
-   hash**. **[IMPLEMENTED]**
-7. The enclave generates an **ephemeral P-256 key** and binds request metadata.
-   **[IMPLEMENTED]**
-8. The **NSM (Nitro Security Module)** produces a **Nitro attestation** document
-   over the canonicalized binding and the attested public key. **[IMPLEMENTED]**
-9. **Olea verifies** the attestation: COSE (CBOR Object Signing and Encryption)
-   signature, certificate chain, **PCR0/1/2**, attested public key, and
-   canonicalized `user_data`, all against **AWS Nitro Root-G1**. **[IMPLEMENTED]**
-10. On success the evidence is retained and a **receipt** is produced.
-    **[IMPLEMENTED for the controlled PoC]**
+6. The enclave generates an **ephemeral P-256 key** and binds request metadata into
+   `user_data` `{requestId, nonce, policyVersion, sourceId, rawHash,
+   transformedHash, publicKey}`. No `tlsProofHash` — there is no external TLS
+   proof. **[IMPLEMENTED]**
+7. The **NSM (Nitro Security Module)** produces a **Nitro attestation** over the
+   canonical binding and the attested public key. **[IMPLEMENTED]**
+8. The enclave signs the evidence manifest and returns the package to the
+   Coordinator. **[IMPLEMENTED]**
+9. The Coordinator signs the submission envelope and POSTs to **Olea's Verifier**
+   (`POST /v1/evidence`). **Olea verifies**: nonce freshness and single-use;
+   PCR0/1/2 against the registered release; COSE signature and certificate chain to
+   AWS Nitro Root-G1; `user_data` binding; enclave signature; Dowsure submission
+   signature. **[IMPLEMENTED]**
+10. On success → **202 ACCEPTED** → evidence written to the S3 Object-Lock vault.
+    **[DONE — 7×202 ACCEPTED, all sources proven live]**
 
 **What is open:**
 
-- The real signed **TLSNotary** proof (today's check is a placeholder). **[OPEN]**
-- A full live **Olea acceptance receipt** end to end. **[OPEN]**
-- Replacing the transitional **Step Functions / API Gateway parent fixture** with
-  the real coordinator path. **[OPEN]**
+- Production hardening: config delivery (baked for PoC → attested KMS/Secrets Manager
+  for production). **[PLANNED]**
+- Verifier Lambda sync with CloudFormation (`sam deploy` pending). **[PLANNED]**
+- Real business transforms (currently pass-through). **[PLANNED]**
 
-**Facts:** the enclave fingerprints (phase4 EIF SHA-256, PCR0/1/2), the host, and
-the verified request/evidence IDs are recorded once in
-[the status matrix](./PROJECT_STATUS_MATRIX.md#verified-facts-defined-here-linked-everywhere-else)
+**Facts:** the enclave fingerprints (EIF SHA-256, PCR0/1/2), the host, and the
+7 evidence IDs are recorded once in
+[the status matrix](./PROJECT_STATUS_MATRIX.md#verified-facts-authoritative--copy-from-here)
 and are not restated here. See also the
 [architecture diagram](./ARCHITECTURE_DIAGRAM.md).
 
@@ -297,8 +333,12 @@ flowchart TD
 > `<creditCode>`, `<phone>` - never a real national ID, phone number, name, company
 > credit code, or case detail.
 
-**Status:** **PLANNED (Phase 2).** KYC is documented here at flow / decision-model
-level only, not as code integration. See the KYC row in
+**Status:** the **4 KYC source calls are proven live** through the TLS-in-TEE path
+(202 ACCEPTED each): `alicloudTelThree` (`d07f6de7`), `qichachaEnterpriseVerify`
+(`ac87b0ba`), `qichachaShixinCheck` (`e8c25235`), `gutuPanoramaChecks`
+(`71da25ed`). The **rule-check engine** (the ~16-rule decision model above) remains
+**PLANNED (Phase 2)** — it is documented here at decision-model level only, not yet
+built as code. See the KYC row in
 [source endpoints](./SOURCE_ENDPOINTS.md#1-the-source-map-four-data-categories-plus-kyc).
 
 ---

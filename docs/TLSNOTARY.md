@@ -1,9 +1,27 @@
 # TLSNotary MPC-TLS source-authenticity layer
 
-This document describes the real MPC-TLS flow Olea/Dowsure uses to prove that a
+> **⚠️ HISTORICAL REFERENCE.** The MPC-TLS/TLSNotary approach described in this
+> document is **no longer on the live path**. The oracle has been converted to
+> **TLS-in-TEE**: the Nitro enclave opens and terminates the TLS connection to each
+> upstream source itself. The host is a transparent vsock→TCP byte relay. Source
+> authenticity and execution trust are collapsed into a single enclave boundary —
+> no external notary is involved. See
+> [PROJECT_STATUS_MATRIX.md](./PROJECT_STATUS_MATRIX.md) for the live TLS-in-TEE
+> facts (7 source calls, 202 ACCEPTED each). This document is kept as reference
+> material for the MPC-TLS approach.
+
+This document describes the MPC-TLS flow that was previously used to prove that a
 piece of evidence came from a specific upstream TLS server (the Amazon SP-API
 sandbox), who hosts what, why, and how to reproduce both the no-credential gate
 and the orchestrator's credentialed sandbox run.
+
+> **Update (same-bytes binding):** since this doc was first written, the proof now also
+> carries `revealed_recv_b64` (base64 of the exact notarized HTTP response bytes). The
+> enclave and the Olea verifier compute `rawHash = SHA256(decode(rawResponseB64))` and
+> require it to equal `tlsProof.responseHash` — so the TLS proof and the Nitro attestation
+> provably cover the IDENTICAL bytes. The normalized `tlsProof` does NOT include
+> `revealed_recv_b64` (it would corrupt `proofHash`); the raw bytes travel as a separate
+> top-level `rawResponseB64` field. Live sidecar image: `prover-sidecar:alpha.13`.
 
 It is the design/doc for the components implemented across FEAT-001..004:
 

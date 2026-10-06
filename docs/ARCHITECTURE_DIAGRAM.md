@@ -1,53 +1,86 @@
 # Architecture diagram
 
-> Reflects the current working chain after the **rawResponseB64 binding**: the TLS proof
-> and the Nitro attestation bind to the same HTTP response bytes. (The older version of
-> this page described TLSNotary as a blocked placeholder; it is now a real, live notary.)
+> Reflects the current live path: **TLS-in-TEE**. The Nitro enclave opens and
+> terminates TLS to each upstream source itself. The host is a transparent
+> vsock→TCP byte relay that only sees ciphertext. The previous MPC-TLS / TLSNotary
+> approach (external notary + prover sidecar) is historical reference only — see
+> `docs/TLSNOTARY.md`.
 
 ```mermaid
-flowchart LR
-    A["Approved source endpoint<br/>(Amazon SP-API sandbox)"] --> B["Source request / response R"]
-    B --> C["TLSNotary prover + notary<br/>MPC-TLS, Olea-pinned key"]
-    C --> D["Proof bundle<br/>response_hash + revealed_recv_b64 + nonce"]
-    D --> E["Dowsure coordinator"]
-    E --> F["Java Nitro enclave (CID 16)"]
-    F --> G["rawHash = SHA256(decode(rawResponseB64))<br/>gate: rawHash == tlsProof.responseHash"]
-    F --> H["Deterministic transform"]
-    H --> I["Transformed hash"]
-    F --> J["Ephemeral P-256 key"]
-    J --> K["AWS Nitro attestation (NSM)"]
-    K --> L["PCR + certificate chain + root validation"]
-    L --> M["Olea verifier"]
-    M --> N["Evidence vault + receipt"]
-
-    style C fill:#f9d423,stroke:#333,stroke-width:1px
-    style G fill:#c9b6f0,stroke:#333,stroke-width:1px
-    style L fill:#8ad17d,stroke:#333,stroke-width:1px
-    style N fill:#7ab8ff,stroke:#333,stroke-width:1px
+flowchart TB
+    subgraph OLEA["Olea control plane"]
+        CH["Challenge API\nPOST /v1/challenges"]
+        VER["Verifier Lambda\nPOST /v1/evidence"]
+        REL[("Release registry\neifDigest + PCR0/1/2")]
+        VAULT[("Evidence vault\nS3 Object-Lock")]
+    end
+    subgraph DOW["Dowsure Nitro EC2 host"]
+        COORD["Coordinator (Java)\n--source-id"]
+        RELAY["vsock→TCP relay\n(ciphertext only)"]
+        subgraph ENC["Nitro Enclave (sealed, measured EIF)"]
+            REG["SourceRegistry\n7 entries"]
+            TLS["SourceTlsClient\nterminates TLS"]
+            SVC["EnclaveService\nrawHash + attest + sign"]
+            NSM["NSM attestation"]
+        end
+    end
+    subgraph SRC["Upstream sources"]
+        AMZ["Amazon SP-API\n3 calls"]
+        KYC["KYC vendors\n4 calls"]
+    end
+    COORD -->|"1 challenge"| CH
+    CH -->|"nonce"| COORD
+    COORD -->|"2 vsock: sourceId"| SVC
+    SVC --> REG
+    SVC --> TLS
+    TLS -->|"3 TLS over vsock"| RELAY
+    RELAY -->|"ciphertext"| AMZ
+    RELAY -->|"ciphertext"| KYC
+    SVC --> NSM
+    SVC -->|"4 evidence"| COORD
+    COORD -->|"5 POST /v1/evidence"| VER
+    VER --> REL
+    VER -->|"202→vault"| VAULT
 ```
 
-## What the diagram means
+## What the diagram means (TLS-in-TEE walkthrough)
 
-- The source endpoint is the upstream system whose response is proven (Amazon SP-API).
-- The TLSNotary stage (prover + Olea-pinned notary) produces a signed proof that the exact response bytes came from that server, bound to a one-time nonce.
-- The Dowsure coordinator passes the parsed payload, the raw response bytes (`rawResponseB64`), and the proof to the enclave over vsock.
-- The enclave computes `rawHash` over the raw response bytes and refuses to proceed unless it equals the notary's `response_hash` (the same-bytes bridge), then transforms the payload and binds request metadata into the attestation `user_data`.
-- AWS Nitro (NSM) produces a signed attestation document.
-- Olea verifies the attestation document, PCRs, certificate chain to the AWS Nitro root, and key bindings.
-- If the proof and attestation both pass, the evidence is retained and a receipt is written to the Object-Lock vault.
+1. The **Coordinator** (Java, running on the Nitro EC2 host) requests a challenge
+   nonce from Olea's Challenge API (`POST /v1/challenges`), scoped by `sourceId`.
 
-## Current reality
+2. The Coordinator sends the `sourceId`, nonce, and `eifDigest` to the **enclave**
+   over vsock (4-byte big-endian length-prefix framing).
 
-The full trust path is working and proven live, component by component:
+3. Inside the enclave, the **SourceRegistry** resolves the `sourceId` to a host,
+   path, and headers. The **SourceTlsClient** opens and terminates a TLS connection
+   to the upstream source — the TLS handshake, encryption, and decryption all happen
+   inside the enclave. The connection is routed through the host's **vsock→TCP relay**,
+   which forwards raw ciphertext bytes without inspecting or modifying them.
 
-- Nitro enclave runtime (non-debug, CID 16),
-- real MPC-TLS notarization via the Olea-hosted, pinned notary,
-- same-bytes binding (`rawResponseB64` → `rawHash` == `response_hash`),
-- attestation verification, PCR validation, certificate chain to AWS Nitro Root-G1,
-- EIF registration in the Olea release registry (ACTIVE).
+4. The enclave receives the plaintext response `R`, computes
+   `rawHash = SHA256(R)`, runs the transform (currently pass-through), generates an
+   ephemeral P-256 key, binds `{requestId, nonce, policyVersion, sourceId, rawHash,
+   transformedHash, publicKey}` into `user_data`, and requests NSM attestation. The
+   enclave signs the evidence manifest and returns the full evidence package to the
+   Coordinator.
 
-Remaining integration step: run the coordinator → enclave vsock call on the Nitro host
-against a challenge-issued nonce, then the live `POST /v1/evidence` acceptance (202).
+5. The Coordinator signs the submission envelope and POSTs the combined evidence to
+   Olea's Verifier (`POST /v1/evidence`). The Verifier checks: nonce freshness and
+   single-use; PCR0/1/2 against the registered release; attestation COSE signature
+   and certificate chain to AWS Nitro Root-G1; `user_data` binding; enclave
+   signature; Dowsure submission signature. On success → **202 ACCEPTED** →
+   evidence written to the S3 Object-Lock vault.
 
-The flow remains fail-closed: any broken seal (notary key, domain, nonce, bytes, PCRs,
-signatures) rejects the submission.
+## Current reality — 7×202 ACCEPTED
+
+All 7 source calls have been proven live via `oracle.oleainternal.com`:
+
+- **Amazon SP-API (3):** getOrderMetrics, listFinancialEventGroups, listTransactions
+- **KYC vendors (4):** alicloudTelThree, qichachaEnterpriseVerify, qichachaShixinCheck, gutuPanoramaChecks
+
+Enclave: `olea-orders-tlsintee-f`, CID 16, non-debug (Flags: NONE).
+EIF SHA-256 and PCR values are in
+[PROJECT_STATUS_MATRIX.md](./PROJECT_STATUS_MATRIX.md#verified-facts-authoritative--copy-from-here).
+
+The flow is fail-closed: any broken seal (nonce, PCRs, attestation signature,
+enclave signature, Dowsure signature) rejects the submission.

@@ -23,18 +23,18 @@ for validating the trust architecture.
 
 ## Current status
 
-The architecture is valid for a proof-of-trust prototype:
+The architecture is validated end-to-end with 7 source calls returning 202 ACCEPTED
+via the TLS-in-TEE path:
 
 - attestation verification is implemented and tested,
 - the verifier checks **PCR (Platform Configuration Register)** values, public keys,
   and canonicalized `user_data`,
-- the mock endpoint behaves as a controlled source for the trust chain,
-- the **TLSNotary** proof gate (a real signed proof that an HTTPS response came
-  from a specific server) is still blocked by missing external notary/prover
-  infrastructure. The code checks the proof contract and a response hash only;
-  it is a placeholder, not a real signed proof.
+- the enclave terminates TLS itself (TLS-in-TEE) — source authenticity and execution
+  trust are collapsed into a single enclave boundary,
+- the previous MPC-TLS/TLSNotary approach (external notary + prover sidecar) is
+  historical reference only, off the live path.
 
-For the exact verified status facts (enclave fingerprint, host, verified IDs), see
+For the exact verified status facts (enclave fingerprint, host, evidence IDs), see
 the single source of truth: [../docs/PROJECT_STATUS_MATRIX.md](../docs/PROJECT_STATUS_MATRIX.md).
 
 ## Deployment units
@@ -64,8 +64,12 @@ Run these to lint the SAM templates locally:
 - `sam validate --lint --template-file dowsure/template.yaml`
 - `sam validate --lint --template-file mocks/amazon/template.yaml`
 
-## Important caveat
+## Fail-closed stance
 
-The code enforces a TLS proof contract and a response-hash binding, but it does
-not prove a real TLSNotary result from a real notary service. That is a deliberate
-security stance: fail closed until the real proof material exists.
+The verifier checks nonce freshness and single-use, PCR0/1/2 against the registered
+release, attestation COSE signature and certificate chain to AWS Nitro Root-G1,
+`user_data` binding, enclave signature, and Dowsure submission signature. In
+TLS-in-TEE, there is no external TLS proof to verify — source authenticity is
+established by the enclave terminating TLS itself (the plaintext never leaves the
+enclave). The stance is fail-closed: any invalid, missing, or mismatched seal is
+rejected.

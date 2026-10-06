@@ -8,35 +8,37 @@
 
 - **[[Olea]]**
   - The verifier now requires Nitro CBOR/COSE documents, certificate-chain validation, AWS Nitro root configuration, PCR matching, attested public-key matching, and exact `user_data` binding.
-  - The Java `JnaAttestationProvider` is wired to the pinned AWS `libnsm.so` ABI; the phase4 Java EIF has been rebuilt, the approved AWS Nitro root has been used, and a non-debug document has passed live verification.
+  - The Java `JnaAttestationProvider` is wired to the pinned AWS `libnsm.so` ABI; the current Java EIF has been built, the approved AWS Nitro root has been used, and a non-debug document has passed live verification (exact EIF/PCR values in the status matrix).
   - Authentication and authorization for administrative policy/release endpoints must be added before production.
   - Synthetic JSON attestation is no longer accepted by the source verifier or enclave runtime.
 
 - **[[Dowsure]]**
-  - A real Nitro-capable EC2 host and running EIF now exist in the preprod account; the deployed Step Functions parent API remains a static fixture.
-  - The Phase 1 end-to-end slice covers one bounded `GET_ORDERS` request against the approved mock source API.
-  - Phase 1 must prove TLSNotary source-proof binding, real vsock integration, and real Nitro attestation; it must not claim Amazon source authenticity.
-  - The fixture immediately reports completion after one poll.
+  - A real Nitro-capable EC2 host and running EIF exist in the preprod account.
+  - The oracle uses TLS-in-TEE: the enclave terminates TLS itself to each of the 7 source endpoints. The host is a transparent vsock→TCP byte relay.
+  - All 7 source calls are proven live with 202 ACCEPTED (3 Amazon SP-API + 4 KYC vendors). Evidence IDs are in the status matrix.
+  - The coordinator is driven by `--source-id` (no `--raw-payload-file`, `--raw-response-b64-file`, `--tls-proof-file`).
+  - vsock framing uses 4-byte big-endian length-prefix (no half-close).
+  - The previous MPC-TLS/TLSNotary approach (external notary + prover sidecar) is historical reference, off the live path.
   - The EventBridge connection uses one PoC API-key credential for both endpoint families.
   - Production should use approved endpoint-specific authentication and private connectivity where required.
-  - The coordinator now targets AF_VSOCK CID `16`, port `5005`; the API Gateway parent fixture remains only a transitional transport for the Step Functions integration.
+  - Config is baked into the EIF for the PoC; production should use attested KMS → Secrets Manager.
 
 - **[[Mock Source API]]**
   - Responses are controlled fixtures and are not Amazon source proof.
-  - TLSNotary compatibility and proof-to-response hash binding remain mandatory Phase 1 implementation gates.
+  - The live path uses TLS-in-TEE (the enclave terminates TLS itself to reach the
+    real upstream sources). The mock remains only a controlled fixture for local
+    testing, not a source of Amazon authenticity.
 
 - **Assurance Boundary**
   - No mock output can be described as verified Amazon evidence.
-  - The Nitro host and phase4 Java EIF are real and running, and the phase4 EIF
+  - The Nitro host and the current Java EIF are real and running, and that EIF's
     SHA-256 is registered `ACTIVE` in preprod (exact values in the status matrix).
-    The genuinely open gates are: approved TLSNotary prover/notary integration (the
-    code is a placeholder today), encrypted evidence transfer, and replacing the
-    transitional Step Functions parent fixture with the real coordinator service.
-  - The Amazon SP-API (Selling Partner API) **sandbox is now available** for
-    validation; its endpoints and credentials exist (credentials are stored as
-    secrets / supplied out of band - never written in any doc). So the sandbox is
-    not blocked. The next integration slice can exercise the real sandbox
-    (Transactions, Financial Event Groups, Order Metrics) through the enclave.
-    Full production Amazon onboarding (LWA / Login with Amazon, real seller
+    The oracle uses TLS-in-TEE: the enclave terminates TLS itself. All 7 source
+    calls are proven live with 202 ACCEPTED. The previous MPC-TLS/TLSNotary approach
+    is historical reference.
+  - Remaining production-hardening items: config delivery (baked → attested
+    KMS/Secrets Manager), verifier Lambda sync with CloudFormation (`sam deploy`),
+    real business transforms, encrypted evidence transfer.
+  - Full production Amazon onboarding (LWA / Login with Amazon, real seller
     accounts, reports, presigned downloads) remains Phase 2.
   - Production acceptance requires real EIF measurements, Nitro attestation, signatures, deterministic canonicalization, and independently reproducible hashes.

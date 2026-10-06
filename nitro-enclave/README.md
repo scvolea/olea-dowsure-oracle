@@ -7,28 +7,37 @@ parent host). The goal is to prove that the trusted-execution and attestation
 path is real.
 
 > **In plain English.** This part proves "the code ran inside a real,
-> locked-down box and we can cryptographically prove exactly which code ran." It
-> does **not** yet prove "the data it fetched really came from Amazon" - that
-> second proof (TLSNotary) is still a placeholder. See the limitation below.
+> locked-down box and we can cryptographically prove exactly which code ran." The
+> oracle uses **TLS-in-TEE**: the enclave opens and terminates its own TLS
+> connection to each upstream source — it is not a separate notary witnessing the
+> call. The host is a transparent vsock→TCP byte relay carrying only ciphertext.
+> Source authenticity and execution trust are collapsed into one enclave boundary.
+> See the status section below and
+> [docs/PROJECT_STATUS_MATRIX.md](../docs/PROJECT_STATUS_MATRIX.md) for the live facts
+> (7 source calls proven live, 202 ACCEPTED each).
 
 ## What it does
 
 Inside the enclave, the Java service:
 
 - accepts one bounded request over the **virtual socket (vsock / AF_VSOCK)** - the
-  only channel between the enclave and its parent host,
-- calculates the raw hash and the transformed hash of the payload,
-- binds the request metadata into the attestation `user_data` field,
+  only channel between the enclave and its parent host (4-byte big-endian
+  length-prefix framing),
+- resolves the `sourceId` via the SourceRegistry (7 entries),
+- opens and terminates its own TLS connection to the upstream source via the
+  vsock→TCP relay (the host only sees ciphertext),
+- calculates the raw hash (`SHA256(response)`) and the transformed hash,
+- binds the request metadata into the attestation `user_data` field
+  (`{requestId, nonce, policyVersion, sourceId, rawHash, transformedHash, publicKey}`),
 - generates a short-lived (ephemeral) keypair,
 - asks the hardware for a real Nitro **attestation** document (a signed document
   that proves which code is running and binds the public key to this enclave),
 - returns an evidence package that Olea can verify.
 
-The request path is deliberately narrow. In the code (`EnclaveService.java`) the
-source and endpoint are hardcoded to `source='mock-api'` and
-`endpoint='GET_ORDERS'`; any other values are rejected with `SOURCE_SCOPE_INVALID`.
-`EnclaveMain.java` serves this on **CID 16, port 5005** (the enclave only reaches
-`RUNNING` on CID 16 because that binding is fixed in code).
+The request path is scoped by `sourceId`. In the code (`EnclaveService.java`) the
+SourceRegistry holds the 7 approved source entries; a `sourceId` outside the
+registry is rejected. `EnclaveMain.java` serves on **CID 16** (the enclave only
+reaches `RUNNING` on CID 16 because that binding is fixed in code).
 
 ## Why it matters
 
@@ -62,18 +71,24 @@ Acronyms used above, expanded on first use:
 - **CBOR (Concise Binary Object Representation)** - the compact binary encoding COSE uses.
 - **NSM (Nitro Security Module)** - the hardware component that signs the attestation document.
 - **vsock / AF_VSOCK (virtual socket)** - the only channel between the enclave and its host.
-- **TLSNotary** - a protocol that proves a specific HTTPS response really came from
-  a specific server.
+- **TLS-in-TEE** - the enclave opens and terminates its own TLS connection to the
+  upstream source; the host relays only ciphertext.
 
-## Important limitation (honest)
+## Source authenticity (TLS-in-TEE)
 
-The enclave is real and working, but the **upstream source proof is still a
-placeholder.** In the code the enclave only checks that the proof contract is
-present (`proofType == 'tlsnotary'`, a proof hash, and that the response hash
-matches the raw hash). It does **not** yet verify a real signed TLSNotary proof
-from an approved notary. So the enclave path is proven; the full source-authenticity
-chain is still gated on that external notary dependency. This is a deliberate
-fail-closed stance: no real proof material, no claim of real source authenticity.
+The enclave **terminates TLS itself**. The `SourceTlsClient` inside the enclave
+opens a TLS connection to the upstream source and routes it through the host's
+vsock→TCP relay, which forwards raw ciphertext bytes without inspecting them. The
+enclave receives the plaintext response directly and computes
+`rawHash = SHA256(response)` — that hash is the origin anchor, bound into the
+attestation `user_data`. There is no external notary and no separate TLS proof to
+cross-check: source authenticity and execution trust are collapsed into one enclave
+boundary. Because TLS terminates inside the enclave, the host (and Dowsure) can
+never see or alter the plaintext. This path is **proven live** — 7 source calls,
+202 ACCEPTED each; see
+[docs/PROJECT_STATUS_MATRIX.md](../docs/PROJECT_STATUS_MATRIX.md). (The earlier
+MPC-TLS/TLSNotary approach, where a separate notary witnessed the call, is kept as
+historical reference only.)
 
 ## Native boundary
 

@@ -116,25 +116,46 @@ Evidence: the source map and what each endpoint returns are in
 the implemented-vs-planned split is in
 [docs/FLOWS.md](docs/FLOWS.md#flow-2-financing-request-and-super-po).
 
-## Decision 4 - Keep TLSNotary as a placeholder that fails closed
+## Decision 4 - TLSNotary is now historical reference (superseded by TLS-in-TEE)
 
-**Decision.** The TLSNotary proof step is a placeholder. The code enforces a
-proof contract (it checks the proof type, the proof hash, and that the response
-hash matches the raw response hash) and **refuses** to pass data through as proven
-when a real proof is absent. It fails closed rather than faking success.
+> **Updated.** This decision originally kept TLSNotary as a *placeholder*, then was
+> updated when a real MPC-TLS proof was built and proven live. The notary approach
+> has since been **superseded by TLS-in-TEE** (Decision 11): the enclave now
+> terminates TLS itself, and the external notary + prover sidecar are off the live
+> path. The notary code is kept in the repo as historical reference. The original
+> reasoning is preserved below for traceability.
 
-**Why.** There is no approved notary or prover infrastructure, and no approved
-notary public key, available in this repository. Without those, a genuine
-TLSNotary proof cannot be produced or verified here.
+**Decision.** The TLSNotary proof step is **real**. A Rust prover sidecar runs a
+genuine MPC-TLS session against the source with an Olea-hosted notary, and the
+verifier checks a pinned notary key, the server name, freshness (the Olea nonce),
+and that the notarized response hash binds to the raw-source hash. The step still
+**fails closed**: a missing, malformed, wrong-notary, stale, or mismatched proof is
+rejected rather than passed through as proven.
 
-**Why not fake it.** Emitting a "valid" result for unproven data would be worse
-than emitting nothing: it would make unverified data look verified. Failing closed
-keeps the system honest - unproven data never gets to claim it was notarized.
+**Why real now.** An approved notary and prover were stood up (Olea-hosted notary;
+Rust `tlsn` prover sidecar), and MPC-TLS compatibility with the Amazon sandbox was
+confirmed. With that infrastructure in place, a genuine proof can be produced and
+verified here - so the honest position moved from "placeholder" to "built and
+proven live."
 
-Evidence: the TLSNotary placeholder is listed as still-open in
-[docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md#status-table)
-and the proof-contract behavior is traced in
-[docs/FLOWS.md](docs/FLOWS.md#flow-4-tlstee-nitro-attestation-trust-flow).
+**Why keep failing closed.** Emitting a "valid" result for unproven data would be
+worse than emitting nothing: it would make unverified data look verified. Even with
+a real notary, any proof that does not pass every check is refused - unproven data
+never gets to claim it was notarized.
+
+Evidence: TLSNotary is recorded as **Verified (live)** in
+[docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md#status-table); the real
+MPC-TLS flow and the same-bytes binding are traced in
+[docs/FLOWS.md](docs/FLOWS.md#flow-4-tlstee-nitro-attestation-trust-flow),
+documented in [docs/TLSNOTARY.md](docs/TLSNOTARY.md), and the sandbox
+compatibility finding is in
+[.agents/tasks/compat-report.md](.agents/tasks/compat-report.md).
+
+**Original placeholder rationale (historical, superseded).** The step was first
+shipped as a placeholder that enforced only a proof contract (proof type, proof
+hash, and response-hash == raw-response-hash) and refused to pass data through as
+proven when a real proof was absent, because no approved notary, prover, or notary
+public key existed in the repository at that time. That constraint no longer holds.
 
 ## Decision 5 - Repayment must be TEE-only
 
@@ -263,6 +284,63 @@ Evidence: the KYC flow and rule model are in
 and KYC appears as a Phase-2 category in
 [docs/SOURCE_ENDPOINTS.md](docs/SOURCE_ENDPOINTS.md#1-the-source-map-four-data-categories-plus-kyc).
 
+> **Update.** KYC source calls are now proven live through TLS-in-TEE (4 calls,
+> 202 ACCEPTED each). The rule-check engine remains Phase 2.
+
+---
+
+## Decision 11 - Converted from MPC-TLS/notary to TLS-in-TEE (enclave terminates TLS itself)
+
+**Decision.** The oracle was converted from the MPC-TLS/TLSNotary approach (external
+notary + prover sidecar) to **TLS-in-TEE**: the Nitro enclave opens and terminates
+the TLS connection to each upstream source itself. The host is a transparent
+vsock→TCP byte relay that only sees ciphertext. The external notary and the MPC-TLS
+prover sidecar are OFF the live path (kept in the repo as historical reference).
+
+**Why.** TLS-in-TEE is a stronger, simpler trust model. With the enclave
+terminating TLS itself, source authenticity and execution trust collapse into a
+single boundary. There is no external notary dependency, no MPC-TLS protocol
+complexity, and no "same-bytes bridge" to maintain between a separate TLS proof and
+the enclave's attestation. The notary approach was working, but TLS-in-TEE removes
+an entire component (the notary + prover sidecar) and an entire class of failure
+modes (notary unavailability, MPC session timeouts, sidecar compatibility) while
+providing a stronger guarantee — the plaintext response never leaves the enclave.
+
+**Why not keep the notary approach.** The notary was working and proven live, but
+it introduced a dependency on the notary's availability and on MPC-TLS protocol
+compatibility with upstream servers. TLS-in-TEE removes both dependencies. The
+notary code is kept as reference material; it is not deleted.
+
+**Evidence:** 7 source calls proven live with 202 ACCEPTED through TLS-in-TEE.
+Code at `main` `838a170`. Spec at `.kiro/specs/tls-tee-oracle/`. Evidence IDs,
+EIF SHA-256, and PCR values are in
+[docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md#verified-facts-authoritative--copy-from-here).
+
+---
+
+## Decision 12 - Configuration delivery gap — baked config for PoC, attested KMS/Secrets Manager for production
+
+**Decision.** The PoC bakes configuration (source registry entries, API endpoints,
+credentials) into the EIF at build time. Production must use attested
+KMS → Secrets Manager delivery so that secrets are not embedded in the image.
+
+**Why record this.** Nitro enclaves get no runtime environment-variable injection.
+The PoC works around this by baking config into the image, which is acceptable for
+a proof-of-concept but is not acceptable for production: it means secrets are
+included in the EIF, and any config change requires a full image rebuild, re-
+measurement, and re-registration.
+
+**Production recommendation.** Use the Nitro enclave's attestation document to
+authenticate to KMS, then use KMS to decrypt secrets stored in Secrets Manager at
+enclave startup. This keeps secrets out of the image and allows config rotation
+without changing the EIF. The PCR measurements remain stable across config
+changes (they measure the code, not the config).
+
+**Why not fix it now.** The PoC goal was to prove the trust path works
+end-to-end, which it does. The config delivery mechanism is an operational
+hardening concern, not a cryptographic one. It does not affect the validity of
+the 7×202 results.
+
 ---
 
 ## Commercial context (non-technical)
@@ -278,6 +356,9 @@ and KYC appears as a Phase-2 category in
 
 ## See also
 
+- [docs/ENGAGEMENT_CONTEXT.md](docs/ENGAGEMENT_CONTEXT.md) - the engagement origin:
+  the Olea/Dowsure call that chose TLS + TEE, the rejected alternatives, the action
+  items, and the ground-truth business flows these decisions rest on.
 - [docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md) - single source of
   truth for status facts (enclave fingerprint, register values, host facts).
 - [docs/FLOWS.md](docs/FLOWS.md) - the five end-to-end flows these decisions shape.
