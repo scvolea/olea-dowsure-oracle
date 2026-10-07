@@ -24,12 +24,13 @@ The previous approach — using an external TLSNotary/MPC-TLS notary to prove so
 authenticity separately — is now **historical reference** only. TLS-in-TEE supersedes
 it by collapsing source authenticity and execution trust into a single enclave
 boundary. The notary code is kept in the repo for reference (`tls-notary/`,
-`docs/TLSNOTARY.md`).
+`archive/TLSNOTARY.md`).
 
 For the exact, up-to-date status (what is verified, what is open), there is **one**
-source of truth: [docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md), with the
-full narrative + runbook in [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md). This
-README does not repeat the hard numbers; it links to the matrix instead.
+source of truth: [docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md). For the
+step-by-step narrative see [docs/flow-steps/](docs/flow-steps/) and the detailed
+mechanism in [docs/TLS_IN_TEE_EXPLAINED.md](docs/TLS_IN_TEE_EXPLAINED.md). This README
+does not repeat the hard numbers; it links to the matrix instead.
 
 ## What is in this repository (every folder)
 
@@ -57,6 +58,9 @@ Start with the status matrix, then the flows, then the design docs.
 - [docs/FLOWS.md](docs/FLOWS.md) - the five end-to-end flows traced against the actual code.
 - [docs/SOURCE_ENDPOINTS.md](docs/SOURCE_ENDPOINTS.md) - which Amazon Selling Partner API (SP-API) endpoint maps to which data category, plus the Super Purchase Order eligibility formula.
 - [docs/ARCHITECTURE_DIAGRAM.md](docs/ARCHITECTURE_DIAGRAM.md) - the architecture diagram with a plain-language walkthrough.
+- [docs/TLS_IN_TEE_EXPLAINED.md](docs/TLS_IN_TEE_EXPLAINED.md) - detailed explainer of the TLS-in-TEE mechanism (TEE/PCRs, in-enclave TLS, attestation binding, verification, and how it differs from the archived notary design).
+- [docs/flow-steps/](docs/flow-steps/) - step-by-step walkthrough of one verified request (step0 index → step9), with real URLs/payloads, plus the embedded PoC and production topology diagrams.
+- [docs/DOWSURE_BUSINESS_BRIEF.md](docs/DOWSURE_BUSINESS_BRIEF.md) - partner-facing business brief for Dowsure (plain-language flow + the Olea Oracle API integration surface).
 - [opinions.md](opinions.md) - the decision and reasoning log: what was done, what was deliberately not done, and why.
 
 **Design (canonical baseline)**
@@ -99,11 +103,10 @@ The exact facts (stacks, enclave fingerprints, evidence IDs) live only in
 
 ## Recommended next step
 
-Per the status matrix and [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md): the
-TLS-in-TEE path is proven end-to-end (7×202 ACCEPTED). The next slices are production
-hardening (attested KMS/Secrets Manager config delivery instead of baked config),
-syncing the verifier Lambda with CloudFormation (`sam deploy`), real business
-transforms, and building the Super PO / Repayment flows.
+Per the status matrix: the TLS-in-TEE path is proven end-to-end (7×202 ACCEPTED). The
+next slices are production hardening (attested KMS/Secrets Manager config delivery
+instead of baked config), syncing the verifier Lambda with CloudFormation
+(`sam deploy`), real business transforms, and building the Super PO / Repayment flows.
 
 > Note: some older design/handoff docs (`olea-dowsure-technical-design.md`,
 > `olea-dowsure-executive-proposal.md`, dated handoff blocks) are kept as historical

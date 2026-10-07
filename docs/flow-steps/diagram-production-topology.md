@@ -38,49 +38,42 @@ topology**, where we stood up every component ourselves and pointed the enclave 
 
 ```mermaid
 flowchart LR
-    subgraph DOWSURE["🏢 DOWSURE (owns + operates its own infra)"]
-        direction TB
-        DAPP["Dowsure application"]
-        DORACLE["Oracle runtime<br/>• Nitro host they provision<br/>• Runs Olea's SIGNED, UNMODIFIED enclave<br/>• Dowsure's own source credentials"]
+    subgraph DOWSURE["Dowsure infrastructure"]
+        APP["Dowsure application<br/>(coordinator)"]
+        ENCLAVE["Nitro enclave<br/>(oracle)"]
     end
 
-    subgraph SOURCES["🌐 REAL SOURCE APIs (external providers)"]
-        direction TB
-        SRC["Amazon SP-API · Alicloud<br/>Qichacha · Gutu<br/>(production endpoints, real data)"]
+    SRC["Source APIs"]
+
+    subgraph OLEA["Olea"]
+        CHAL["Challenge API"]
+        SUBMIT["Submit Evidence API"]
     end
 
-    subgraph OLEA["🏦 OLEA (owns + operates the trust anchor)"]
-        direction TB
-        OVER["Verifier service<br/>• Issues nonces<br/>• Checks attestation + PCRs + signatures<br/>• Accepts (202) or rejects"]
-        OEIF["Approved-PCR authority<br/>• Registers accepted PCRs per release<br/>• KMS attestation policy"]
-    end
-
-    EIFBUILD["EIF build / review<br/>⚠️ OWNERSHIP TBD<br/>(A) Dowsure builds, Olea reviews + approves PCRs<br/>(B) Olea builds + signs, Dowsure runs"]
-
-    DAPP -->|"1 - need verified<br/>borrower data"| DORACLE
-    DORACLE -->|"2 - fetch over enclave's own TLS<br/>(Dowsure's real credentials)"| SRC
-    SRC -->|"3 - real financial / KYC data"| DORACLE
-    DORACLE -->|"4 - data + attestation proof +<br/>Dowsure signature"| OVER
-    EIFBUILD -.->|"the exact code<br/>Dowsure must run (PCRs)"| DORACLE
-    EIFBUILD -.->|"approved PCRs"| OEIF
-    OEIF -.->|"PCRs to check against"| OVER
-    OVER -->|"5 - verify independently → 202 ACCEPTED"| OVER
+    APP -->|"1 - get challenge (nonce)"| CHAL
+    APP -->|"2 - dispatch request"| ENCLAVE
+    ENCLAVE -->|"3 - fetch over its own TLS"| SRC
+    SRC -->|"4 - data"| ENCLAVE
+    ENCLAVE -->|"5 - sealed evidence"| APP
+    APP -->|"6 - submit evidence"| SUBMIT
+    SUBMIT -->|"7 - accept / reject"| APP
 
     classDef dowsure fill:#e8f0fe,stroke:#4285f4,color:#1a1a1a;
     classDef olea fill:#e6f4ea,stroke:#34a853,color:#1a1a1a;
     classDef src fill:#fef7e0,stroke:#fbbc04,color:#1a1a1a;
-    classDef tbd fill:#fde7e9,stroke:#d13438,color:#1a1a1a,stroke-dasharray: 5 5;
-    class DAPP,DORACLE dowsure;
-    class OVER,OEIF olea;
+    class APP,ENCLAVE dowsure;
+    class CHAL,SUBMIT olea;
     class SRC src;
-    class EIFBUILD tbd;
 ```
 
-**The key trust property:** even though **Dowsure runs the oracle on its own infra**,
-Dowsure **cannot tamper** with the data or the code. Olea builds the enclave image and
-records its PCRs; Dowsure must run that *exact* image or the attestation won't match
-Olea's registered PCRs and the KMS key won't release. So Olea gets a trustworthy result
-from infrastructure it does not control.
+The **Dowsure application** (the coordinator — Dowsure's own code on Dowsure's
+infrastructure) drives the whole flow: it gets a one-time challenge (nonce) from Olea's
+**Challenge API**, dispatches the request to the **Nitro enclave** (the oracle), which
+fetches from the source APIs over its own TLS and returns sealed evidence. The Dowsure
+application then calls Olea's **Submit Evidence API**, which accepts or rejects it. The
+enclave only ever talks over vsock to the application — it has no network and never
+calls Olea directly. The technical component diagram below shows how the pieces are
+deployed.
 
 ---
 
@@ -116,19 +109,19 @@ graph TB
 
     BUILD["EIF build / review<br/>⚠️ OWNERSHIP TBD<br/>(A) Dowsure builds, Olea reviews<br/>(B) Olea builds + signs"]
 
-    COORD <-->|AF_VSOCK<br/>len-prefix frames| ESVC
-    ESVC <-->|AF_VSOCK| RELAY
-    DCREDS -.->|injected into enclave<br/>(scoped credential)| ESVC
-    RELAY <-->|TCP/TLS (ciphertext only)| AMZ
-    RELAY <-->|TCP/TLS (ciphertext only)| KYC
-    COORD <-->|HTTPS| APIGW
+    COORD <-->|"AF_VSOCK<br/>len-prefix frames"| ESVC
+    ESVC <-->|"AF_VSOCK"| RELAY
+    DCREDS -.->|"injected into enclave<br/>(scoped credential)"| ESVC
+    RELAY <-->|"TCP/TLS (ciphertext only)"| AMZ
+    RELAY <-->|"TCP/TLS (ciphertext only)"| KYC
+    COORD <-->|"HTTPS"| APIGW
     APIGW --> LAMBDA
     LAMBDA <--> DDB
     LAMBDA --> S3
-    PROLE -.->|attested KMS Sign<br/>(key released only if<br/>PCR0 matches)| KMS
-    ESVC -.->|attestation doc rides<br/>along KMS Sign| KMS
-    BUILD -.->|signed EIF<br/>Dowsure runs unmodified| DENCLAVE
-    BUILD -.->|approved PCRs| PCRREG
+    PROLE -.->|"attested KMS Sign<br/>(key released only if<br/>PCR0 matches)"| KMS
+    ESVC -.->|"attestation doc rides<br/>along KMS Sign"| KMS
+    BUILD -.->|"signed EIF<br/>Dowsure runs unmodified"| DENCLAVE
+    BUILD -.->|"approved PCRs"| PCRREG
 
     classDef dowsure fill:#e8f0fe,stroke:#4285f4,color:#1a1a1a;
     classDef olea fill:#e6f4ea,stroke:#34a853,color:#1a1a1a;

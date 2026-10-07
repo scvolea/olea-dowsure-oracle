@@ -23,3 +23,6 @@ __pycache__/
 tmp/
 .agents/
 .local-notes/
+
+# Local editor workspace file
+*.code-workspace

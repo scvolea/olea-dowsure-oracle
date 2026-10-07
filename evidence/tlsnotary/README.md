@@ -48,4 +48,4 @@ cases.
 - No real notary key: `notary_pub_key_id` is an example-shape P-256 key id.
 - Raw/credentialed artifacts (a real sidecar bundle, a real transcript) are
   gitignored under `evidence/tlsnotary/` and never committed. See the
-  orchestrator-only credentialed reproduce in `docs/TLSNOTARY.md`.
+  orchestrator-only credentialed reproduce in `archive/TLSNOTARY.md`.

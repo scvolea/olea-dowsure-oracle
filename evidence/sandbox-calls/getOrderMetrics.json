@@ -1,0 +1,32 @@
+{
+  "label": "getOrderMetrics",
+  "method": "GET",
+  "path": "/sales/v1/orderMetrics",
+  "query": {
+    "marketplaceIds": "ATVPDKIKX0DER",
+    "interval": "2022-08-01T00:00:00-07:00--2022-08-02T00:00:00-07:00",
+    "granularity": "Total"
+  },
+  "full_url": "https://sandbox.sellingpartnerapi-na.amazon.com/sales/v1/orderMetrics?marketplaceIds=ATVPDKIKX0DER&interval=2022-08-01T00%3A00%3A00-07%3A00--2022-08-02T00%3A00%3A00-07%3A00&granularity=Total",
+  "captured_at": "2026-10-01T23:25:24.895663+00:00",
+  "status": 200,
+  "request_id": "46343f5c-9751-4fc7-9d73-1172105e0487",
+  "body": {
+    "payload": [
+      {
+        "interval": "2019-08-01T00:00-07:00--2018-08-03T00:00-07:00",
+        "unitCount": 2,
+        "orderItemCount": 2,
+        "orderCount": 2,
+        "averageUnitPrice": {
+          "amount": "12.5",
+          "currencyCode": "USD"
+        },
+        "totalSales": {
+          "amount": "25",
+          "currencyCode": "USD"
+        }
+      }
+    ]
+  }
+}

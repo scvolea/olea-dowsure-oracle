@@ -21,7 +21,7 @@ so nobody had to trust the enclave alone. **That party is gone.** Now the enclav
 terminates TLS itself and the **Nitro attestation document** (PCR0/1/2 measuring the
 exact code image) *is* the proof. Anyone can verify the measurements match a
 registered, non-revoked release. The notary + sidecar code remains in the repo
-(`docs/TLSNOTARY.md`, `tlsnotary-verifier.js`) as historical reference, **off the live
+(`archive/TLSNOTARY.md`, `tlsnotary-verifier.js`) as historical reference, **off the live
 path**.
 
 ## The 7 source calls (`sourceId` → provider/method/path)
@@ -210,12 +210,12 @@ graph TB
         KMOCK["KYC mock<br/>i8yde0kf2g...amazonaws.com"]
     end
 
-    COORD <-->|AF_VSOCK<br/>CID 16:5005<br/>len-prefix frames| VSRV
-    ESVC <-->|AF_VSOCK<br/>CID 3:8001/8002| RELAY1
-    ESVC <-->|AF_VSOCK<br/>CID 3:8001/8002| RELAY2
-    RELAY1 <-->|TCP/TLS| AMOCK
-    RELAY2 <-->|TCP/TLS| KMOCK
-    COORD <-->|HTTPS| APIGW
+    COORD <-->|"AF_VSOCK<br/>CID 16:5005<br/>len-prefix frames"| VSRV
+    ESVC <-->|"AF_VSOCK<br/>CID 3:8001/8002"| RELAY1
+    ESVC <-->|"AF_VSOCK<br/>CID 3:8001/8002"| RELAY2
+    RELAY1 <-->|"TCP/TLS"| AMOCK
+    RELAY2 <-->|"TCP/TLS"| KMOCK
+    COORD <-->|"HTTPS"| APIGW
     APIGW --> LAMBDA
     LAMBDA <--> DDB
     LAMBDA --> S3

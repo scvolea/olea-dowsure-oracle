@@ -74,14 +74,14 @@ return response(202, receipt);
 
 ## 202 response (receipt)
 
-```json
+```jsonc
 {
-  "evidenceId": "a1b2c3d4-...",
-  "requestId": "7e7e04ee-...",
-  "status": "ACCEPTED",
-  "reasonCode": "SUCCESS",
-  "manifestDigest": "9f86d081...",
-  "acceptedAt": "2026-10-06T02:16:31.000Z"
+  "evidenceId":     "a1b2c3d4-...",        // string (UUID) — key to fetch this receipt later
+  "requestId":      "7e7e04ee-...",        // string (UUID) — the request this receipt is for
+  "status":         "ACCEPTED",            // string (enum) — ACCEPTED here; REJECTED on any failed check
+  "reasonCode":     "SUCCESS",             // string (enum) — SUCCESS, or a specific reason on reject
+  "manifestDigest": "9f86d081...",         // string (hex sha256) — the accepted manifest's digest
+  "acceptedAt":     "2026-10-06T02:16:31Z" // string (ISO-8601 UTC) — acceptance timestamp
 }
 ```
 

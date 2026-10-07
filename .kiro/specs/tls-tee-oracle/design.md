@@ -88,7 +88,7 @@ New class `nitro-enclave/.../SourceTlsClient.java`:
   optional request body (call #7).
 - Opens `SSLSocket` over the vsock-backed transport, sends the HTTP/1.1 request with
   `Connection: close` and `Accept-Encoding: identity` (bounded, no compression — same
-  constraints the MPC-TLS path used, see `.agents/tasks/compat-report.md`), reads the
+  constraints the MPC-TLS path used), reads the
   **full** response bytes `R` (status line + headers + body).
 - Returns `R` as a byte array. `rawResponseB64 = base64(R)` and
   `rawHash = SHA256(R)` are computed inside the enclave (replacing the caller-supplied

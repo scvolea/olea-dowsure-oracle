@@ -1,0 +1,43 @@
+{
+  "label": "listTransactions",
+  "method": "GET",
+  "path": "/finances/2024-06-19/transactions",
+  "query": {
+    "postedAfter": "2023-03-07",
+    "nextToken": "jehgri34yo7jr9e8f984tr9i4o"
+  },
+  "full_url": "https://sandbox.sellingpartnerapi-na.amazon.com/finances/2024-06-19/transactions?postedAfter=2023-03-07&nextToken=jehgri34yo7jr9e8f984tr9i4o",
+  "captured_at": "2026-10-01T23:25:25.652842+00:00",
+  "status": 200,
+  "request_id": "4379e1de-2b18-4db6-a97e-156db3ce8881",
+  "body": {
+    "payload": {
+      "nextToken": "Next token value",
+      "transactions": [
+        {
+          "sellingPartnerMetadata": {
+            "sellingPartnerId": "A3TH9S8BH6GOGM",
+            "accountType": "PAYABLE",
+            "marketplaceId": "ATIV93840DER"
+          },
+          "relatedIdentifiers": [
+            {
+              "relatedIdentifierName": "FINANCIAL_EVENT_GROUP_ID",
+              "relatedIdentifierValue": "4MVaHcsAfaYAlwlaPWrXJxrfUiKfYZ2ooWtY7528FUA"
+            },
+            {
+              "relatedIdentifierName": "ORDER_ID",
+              "relatedIdentifierValue": "8129762527551"
+            }
+          ],
+          "transactionType": "Shipment",
+          "postedDate": "2020-07-14T03:35:13.214Z",
+          "totalAmount": {
+            "currencyAmount": 10,
+            "currencyCode": "USD"
+          }
+        }
+      ]
+    }
+  }
+}

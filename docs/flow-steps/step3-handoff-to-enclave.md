@@ -31,14 +31,15 @@ bytes, then processes.
 
 Built by `Coordinator.enclaveRequest()`:
 
-```json
+```jsonc
 {
-  "requestId": "7e7e04ee-...",
-  "nonce": "dGhpcyBpcyBhIDMyLWJ5dGUgcmFuZG9tIG5vbmNl...",
-  "policyVersion": "v1.0",
-  "evidenceId": "a1b2c3d4-...",
-  "eifDigest": "a837d6739cae6e45ba9785e0991099d85764ecdd7831a99fc7310d05aa930444",
-  "sourceId": "getOrderMetrics"
+  "requestId":     "7e7e04ee-...",   // string (UUID) — from step 1
+  "nonce":         "dGhpcyBpcyBh...", // string (base64url) — from the challenge; gets bound into the attestation
+  "policyVersion": "v1.0",           // string — from the challenge
+  "evidenceId":    "a1b2c3d4-...",   // string (UUID) — from step 1
+  "eifDigest":     "a837d673...0444",// string (hex sha256) — the running EIF; echoed into the evidence
+  "sourceId":      "getOrderMetrics" // string (enum) — selects the SourceRegistry entry to fetch
+  // "requestBody": { ... }          // object (optional) — only for POST sources (gutuPanoramaChecks)
 }
 ```
 

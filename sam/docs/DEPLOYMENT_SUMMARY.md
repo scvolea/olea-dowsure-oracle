@@ -16,11 +16,10 @@
   - Record the Olea `ApiUrl` output.
   - Supply `NitroRootCertPem` with the AWS Nitro root certificate PEM when deploying Olea; an empty value intentionally causes attestation verification to fail closed.
   - Register policy `v1.0` through `POST /v1/policies`.
-  - Register the approved EIF digest and live PCR0/PCR1/PCR2 values through `POST /v1/releases` for the `GET_ORDERS` source-proof flow.
+  - Register the approved EIF digest and live PCR0/PCR1/PCR2 values through `POST /v1/releases` (the current ACTIVE release label is `tls-in-tee-framing`; exact values in the status matrix).
   - Deploy Dowsure, passing the Olea output:
     - `sam deploy --guided --template-file dowsure/template.yaml --parameter-overrides OleaApiBaseUrl=<OLEA_API_URL> --profile preprod --region ap-southeast-1`
-  - Configure the approved mock source `GET /orders` endpoint and TLSNotary proof in the enclave runtime for Phase 1.
-  - Do not deploy or configure Amazon SP-API, LWA, seller accounts, reports, or financial-report fixtures in Phase 1.
+  - The enclave uses **TLS-in-TEE** — it opens its own TLS connection to each `sourceId` over the host `vsock→TCP` relay. There is no notary/`tlsProof` configuration. For the live run, stand up the `vsock-proxy` egress relays for the source hosts before launching the enclave.
 
 - **Stack Independence**
   - Each directory is an independent SAM application.
@@ -31,7 +30,7 @@
 - **Nitro PoC Runtime**
   - Template: [../../infra/nitro-ec2.yaml](../../infra/nitro-ec2.yaml)
   - Stack: `olea-dowsure-nitro-preprod`
-  - Verified running enclave name: `olea-orders-java`, CID `16`, `2048 MiB`, `2` vCPUs,
+  - Verified running enclave name: `olea-orders-tlsintee-f`, CID `16`, `2048 MiB`, `2` vCPUs,
     Enclave Image File (EIF) state `RUNNING`, non-debug (`Flags: NONE`).
   - For the host, EIF SHA-256, and PCR values, see the status matrix
     ([../../docs/PROJECT_STATUS_MATRIX.md](../../docs/PROJECT_STATUS_MATRIX.md)); they are not repeated here.
@@ -54,21 +53,22 @@
     request/evidence IDs, and the Jira release-gate items are recorded once in the
     status matrix: [../../docs/PROJECT_STATUS_MATRIX.md](../../docs/PROJECT_STATUS_MATRIX.md).
 
-- **Java Enclave Phase 4 — Runtime Verified**
+- **Java Enclave (TLS-in-TEE) — Runtime Verified**
   - The Docker builder compiles the shaded Java 21 JAR, compiles the pinned NSM
-    (Nitro Security Module) library, and runs `java -jar /app/enclave-service.jar`.
-  - The enclave runs as `olea-orders-java`, CID `16`, `2` vCPUs, `2048 MiB`,
+    (Nitro Security Module) library and CA bundle, and runs
+    `java -jar /app/enclave-service.jar`.
+  - The enclave runs as `olea-orders-tlsintee-f`, CID `16`, `2` vCPUs, `2048 MiB`,
     non-debug (`Flags: NONE`). CID `16` is required because `EnclaveMain` binds the
-    Java AF_VSOCK (virtual socket) port `5005` to CID `16`; a CID `17` launch
-    surfaced the mismatch as `VSOCK_SERVER_FAILED` (not an EIF failure), and the
-    corrected CID `16` launch reaches `RUNNING`.
+    Java AF_VSOCK (virtual socket) port `5005` to CID `16`.
   - The old Python EIF/PCR set must not be used as Java evidence.
-  - Verified fingerprints (EIF SHA-256, PCR0/1/2), the live request/evidence IDs,
+  - Verified fingerprints (EIF SHA-256, PCR0/1/2), the 7 live request/evidence IDs,
     and the AWS Nitro Root-G1 / COSE / certificate-chain / PCR / public-key /
     canonicalized `user_data` verification results are recorded once in the status
     matrix: [../../docs/PROJECT_STATUS_MATRIX.md](../../docs/PROJECT_STATUS_MATRIX.md).
-  - Remaining gates: run the live Olea acceptance receipt and replace the TLSNotary
-    proof contract with an approved prover/notary service and real signed proof verification.
+  - **Status: all 7 source calls proven live, 202 ACCEPTED each.** Remaining
+    production-hardening items (config delivery, verifier Lambda `sam deploy` sync,
+    real transforms) are in the status matrix; there is no notary gate — the enclave
+    terminates TLS itself.
 
 - **Suggested Stack Names**
   - `olea-oracle-preprod`

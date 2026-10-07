@@ -37,17 +37,17 @@ purpose - just the operation, the fields that matter, and a plain note.
 
 | # | Data category | Source operation | Returns (key fields) | Status note |
 | --- | --- | --- | --- | --- |
-| a | **Shop-level FINANCIALS** | Financial Event Groups: `GET /finances/v0/financialEventGroups` (`listFinancialEventGroups`) | Settlement / fund-transfer groups: `FinancialEventGroupId`, `OriginalTotal`, `FundTransferStatus`, `FundTransferDate` | Planned (next). Supplies shop-level money movement. |
-| b | **Shop-level SALES** | Order Metrics: `GET /sales/v1/orderMetrics` (`getOrderMetrics`) | Daily aggregate: `unitCount`, `orderCount`, `averageUnitPrice`, `totalSales` | **This is what the repo Proof of Concept (PoC) currently targets** as a bounded test. |
-| c | **PO-level data** (the `canonical_data` field in financing requests) | Transactions: `GET /finances/2024-06-19/transactions` (`listTransactions`) | Per-transaction detail with a `breakdowns` tree (Sales, Expenses, AmazonFees / Commission, Tax, Shipping), transformed into business records: `seller_id`, `transaction_id`, `sales_amount`, `expenses_amount`, `commission_amount`, `order_id` | Planned (next). This is the real financing data source. |
-| d | **REPAYMENT** | Amazon repayment-plan API (**PRIVATE**) | Repayment schedule and deduction results | **The repayment-plan API is PRIVATE. Amazon does NOT allow Dowsure to share it with any third party. Olea can ONLY view repayment results inside a TLS+TEE (Trusted Execution Environment). The Nitro Enclave is therefore a HARD CONTRACTUAL requirement for this category - not an optional optimization.** See [Repayment flow](./FLOWS.md#flow-3-repayment-and-why-it-is-tee-only). |
-| e | **KYC (Know Your Customer)** | AliCloud three-element verification (`qrymobile.market.alicloudapi.com`); Qichacha enterprise + judicial checks (`EnterpriseInfo` / `Verify`, `ShixinCheck`, `ZhixingCheck`, `SumptuaryCheck`, `BankruptcyCheck`); Gutu / valuemap judicial panorama (`turningapi.valuemap.cn` panorama-checks) | Identity match, enterprise status, and judicial-risk signals (credentials stripped) | Planned (Phase 2). A new Phase-2 TLS+TEE consumer, documented at schema / decision-model level only - not yet code-integrated. |
+| a | **Shop-level FINANCIALS** | Financial Event Groups: `GET /finances/v0/financialEventGroups` (`listFinancialEventGroups`) | Settlement / fund-transfer groups: `FinancialEventGroupId`, `OriginalTotal`, `FundTransferStatus`, `FundTransferDate` | **Proven live** (202 ACCEPTED) via TLS-in-TEE. Supplies shop-level money movement. |
+| b | **Shop-level SALES** | Order Metrics: `GET /sales/v1/orderMetrics` (`getOrderMetrics`) | Daily aggregate: `unitCount`, `orderCount`, `averageUnitPrice`, `totalSales` | **Proven live** (202 ACCEPTED). Was the bounded first probe; now one of the 7 live calls. A sales signal, not the financing input. |
+| c | **PO-level data** (the `canonical_data` field in financing requests) | Transactions: `GET /finances/2024-06-19/transactions` (`listTransactions`) | Per-transaction detail with a `breakdowns` tree (Sales, Expenses, AmazonFees / Commission, Tax, Shipping), transformed into business records: `seller_id`, `transaction_id`, `sales_amount`, `expenses_amount`, `commission_amount`, `order_id` | **Proven live** (202 ACCEPTED). This is the real financing data source. |
+| d | **REPAYMENT** | Amazon repayment-plan API (**PRIVATE**) | Repayment schedule and deduction results | **The repayment-plan API is PRIVATE. Amazon does NOT allow Dowsure to share it with any third party. Olea can ONLY view repayment results inside a TLS+TEE (Trusted Execution Environment). The Nitro Enclave is therefore a HARD CONTRACTUAL requirement for this category - not an optional optimization.** Flow documented; not yet built. See [Repayment flow](./FLOWS.md#flow-3-repayment-and-why-it-is-tee-only). |
+| e | **KYC (Know Your Customer)** | AliCloud three-element verification (`qrymobile.market.alicloudapi.com`); Qichacha enterprise + judicial checks (`EnterpriseInfo` / `Verify`, `ShixinCheck`, `ZhixingCheck`, `SumptuaryCheck`, `BankruptcyCheck`); Gutu / valuemap judicial panorama (`turningapi.valuemap.cn` panorama-checks) | Identity match, enterprise status, and judicial-risk signals (credentials stripped) | **Source calls proven live** (4 calls, 202 ACCEPTED each): `alicloudTelThree`, `qichachaEnterpriseVerify`, `qichachaShixinCheck`, `gutuPanoramaChecks`. The ~16-rule decision engine remains Phase 2. |
 
 > **Do NOT confuse (b) with (c).** Order Metrics (`getOrderMetrics`) alone is
 > **NOT the financing data source.** PO-level financing uses the
 > **Transactions API** (`listTransactions`); shop financials use
 > **Financial Event Groups**. The repo
-> PoC first probed Order Metrics only as a *bounded test* of the enclave path, not
+> first probed Order Metrics only as a *bounded test* of the enclave path, not
 > because Order Metrics is the financing input.
 
 ---
@@ -97,9 +97,10 @@ personal data, or sample day-by-day numbers are reproduced here.
 ### 2c. Order Metrics - `getOrderMetrics` (shop sales - the bounded PoC probe)
 
 - **Operation:** `GET /sales/v1/orderMetrics`
-- **Purpose:** daily aggregate sales for a shop. This is the bounded path the
-  current PoC models (see [the status matrix](./PROJECT_STATUS_MATRIX.md)); it is a
-  sales signal, **not** the financing input.
+- **Purpose:** daily aggregate sales for a shop. It was the bounded first probe and
+  is now one of the 7 live source calls (see
+  [the status matrix](./PROJECT_STATUS_MATRIX.md)); it is a sales signal, **not** the
+  financing input.
 - **Request shape:** a `GET` with query parameters only (no JSON body) -
   `marketplaceIds=<marketplaceId>`, an `interval` (start inclusive, end exclusive),
   `granularity=Day`, `granularityTimeZone=UTC`, `buyerType=All`. The seller is

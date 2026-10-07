@@ -4,7 +4,7 @@
 > terminates TLS to each upstream source itself. The host is a transparent
 > vsock→TCP byte relay that only sees ciphertext. The previous MPC-TLS / TLSNotary
 > approach (external notary + prover sidecar) is historical reference only — see
-> `docs/TLSNOTARY.md`.
+> `archive/TLSNOTARY.md`.
 
 ```mermaid
 flowchart TB

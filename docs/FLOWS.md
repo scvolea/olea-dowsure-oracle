@@ -87,11 +87,11 @@ flowchart LR
 
 1. The seller completes LWA (Login with Amazon) so Dowsure can read that seller's
    SP-API (Selling Partner API) data on their behalf.
-2. **Shop sales** come from Order Metrics (`getOrderMetrics`). This is the bounded
-   path the enclave currently models as the mock `GET_ORDERS` test. **[IMPLEMENTED
-   as a bounded mock probe]**
+2. **Shop sales** come from Order Metrics (`getOrderMetrics`), proven live through
+   the TLS-in-TEE path. **[IMPLEMENTED — proven live, 202 ACCEPTED]**
 3. **Shop financials** come from Financial Event Groups
-   (`listFinancialEventGroups`). Wiring this live is **[PLANNED]**.
+   (`listFinancialEventGroups`), also proven live. **[IMPLEMENTED — proven live,
+   202 ACCEPTED]**
 4. Live validation against the real Amazon sandbox is now **possible** - the
    Amazon SP-API sandbox and its credentials are available (see
    [status matrix](./PROJECT_STATUS_MATRIX.md)). This is no longer blocked.

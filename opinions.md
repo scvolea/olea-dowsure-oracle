@@ -143,13 +143,12 @@ worse than emitting nothing: it would make unverified data look verified. Even w
 a real notary, any proof that does not pass every check is refused - unproven data
 never gets to claim it was notarized.
 
-Evidence: TLSNotary is recorded as **Verified (live)** in
-[docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md#status-table); the real
-MPC-TLS flow and the same-bytes binding are traced in
-[docs/FLOWS.md](docs/FLOWS.md#flow-4-tlstee-nitro-attestation-trust-flow),
-documented in [docs/TLSNOTARY.md](docs/TLSNOTARY.md), and the sandbox
-compatibility finding is in
-[.agents/tasks/compat-report.md](.agents/tasks/compat-report.md).
+Evidence (historical): TLSNotary was once recorded as Verified (live); it is now
+**Historical reference** in
+[docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md#status-table) (superseded
+by TLS-in-TEE, Decision 11). The MPC-TLS approach is documented in
+[archive/TLSNOTARY.md](archive/TLSNOTARY.md). (The sandbox compatibility finding was in
+`.agents/tasks/compat-report.md`, now kept in local notes only.)
 
 **Original placeholder rationale (historical, superseded).** The step was first
 shipped as a placeholder that enforced only a proof contract (proof type, proof
@@ -312,8 +311,8 @@ compatibility with upstream servers. TLS-in-TEE removes both dependencies. The
 notary code is kept as reference material; it is not deleted.
 
 **Evidence:** 7 source calls proven live with 202 ACCEPTED through TLS-in-TEE.
-Code at `main` `838a170`. Spec at `.kiro/specs/tls-tee-oracle/`. Evidence IDs,
-EIF SHA-256, and PCR values are in
+Code on `main` (TLS-in-TEE merged). Spec at `.kiro/specs/tls-tee-oracle/`. Evidence
+IDs, EIF SHA-256, and PCR values are in
 [docs/PROJECT_STATUS_MATRIX.md](docs/PROJECT_STATUS_MATRIX.md#verified-facts-authoritative--copy-from-here).
 
 ---

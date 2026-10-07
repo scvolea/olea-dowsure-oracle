@@ -18,11 +18,11 @@ Origin: `https://c8tw99zmla.execute-api.ap-southeast-1.amazonaws.com/preprod/v1/
 
 ## Request payload
 
-```json
+```jsonc
 {
-  "requestId": "7e7e04ee-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "sourceId": "getOrderMetrics",
-  "policyVersion": "v1.0"
+  "requestId":     "7e7e04ee-xxxx-...", // string (UUID) — caller-generated; keys the challenge record
+  "sourceId":      "getOrderMetrics",   // string (enum) — one of the 7 registered sources
+  "policyVersion": "v1.0"               // string — policy to bind; must be ACTIVE
 }
 ```
 
@@ -52,17 +52,17 @@ static Map<String, Object> challengeBody(String requestId, String sourceId) {
 
 ## Response payload (201)
 
-```json
+```jsonc
 {
-  "requestId": "7e7e04ee-...",
-  "nonce": "dGhpcyBpcyBhIDMyLWJ5dGUgcmFuZG9tIG5vbmNl...",
-  "policyVersion": "v1.0",
-  "sourceId": "getOrderMetrics",
-  "endpointScope": ["getOrderMetrics"],
-  "transformationVersion": "v1.0",
-  "issuedAt": "2026-10-06T02:15:00.000Z",
-  "expiresAt": "2026-10-06T02:20:00.000Z",
-  "challengeSignature": "MEUCIQ..."
+  "requestId":     "7e7e04ee-...",        // string (UUID) — echoed back
+  "nonce":         "dGhpcyBpcyBh...",      // string (base64url, 32 random bytes) — single-use anti-replay token
+  "policyVersion": "v1.0",                 // string — the ACTIVE policy locked to this challenge
+  "sourceId":      "getOrderMetrics",      // string (enum) — echoed back
+  "endpointScope": ["getOrderMetrics"],    // string[] — sourceIds this challenge permits at submit
+  "transformationVersion": "v1.0",         // string — transform contract version from policy
+  "issuedAt":      "2026-10-06T02:15:00Z", // string (ISO-8601 UTC) — issue time
+  "expiresAt":     "2026-10-06T02:20:00Z", // string (ISO-8601 UTC) — submit before this or CHALLENGE_EXPIRED
+  "challengeSignature": "MEUCIQ..."        // string (base64 ECDSA, KMS) — Olea's signature over the challenge (audit)
 }
 ```
 

@@ -90,8 +90,8 @@ transformation:
 
 - **Order Metrics** - `GET /sales/v1/orderMetrics` (`getOrderMetrics`): daily
   shop-level sales aggregate (`unitCount`, `orderCount`, `averageUnitPrice`,
-  `totalSales`). A **sales signal, not the financing input** - this is the bounded
-  path the current PoC models.
+  `totalSales`). A **sales signal, not the financing input** - it was the bounded
+  first probe and is now one of the 7 live source calls.
 - **Financial Event Groups** - `GET /finances/v0/financialEventGroups`
   (`listFinancialEventGroups`): shop-level settlement / fund-transfer groups
   (`FinancialEventGroupId`, `OriginalTotal`, `FundTransferStatus`,
@@ -149,11 +149,12 @@ Dowsure's delivery-architecture framing; the Olea verifiable-oracle design is th
 ## 5. How this maps to what is built
 
 - The engagement chose **one common TLS + TEE mechanism** for all three data
-  categories (Amazon SP-API, KYC, repayment). The repo proves that mechanism:
-  a real Nitro Enclave + attestation path, now with a real TLSNotary source-proof
-  slice. See [the status matrix](./PROJECT_STATUS_MATRIX.md).
-- **Amazon finances endpoints** (Transactions, Financial Event Groups) are the real
-  next integration target; Order Metrics was only the bounded first probe. See
+  categories (Amazon SP-API, KYC, repayment). The repo proves that mechanism via
+  **TLS-in-TEE**: the Nitro enclave terminates TLS to each source itself (the
+  external TLSNotary source-proof slice described in §6a was built first and is now
+  historical reference). See [the status matrix](./PROJECT_STATUS_MATRIX.md).
+- **All 7 source calls** (3 Amazon SP-API + 4 KYC) are proven live with 202
+  ACCEPTED; Order Metrics was the bounded first probe and is now one of the 7. See
   [Decision 3](../opinions.md#decision-3---use-getordermetrics-as-the-first-bounded-probe-then-re-aim-at-transactions-and-financial-event-groups).
 - **KYC** is a confirmed Phase-2 consumer of the same solution, documented at
   flow / decision-model level only. See
@@ -175,8 +176,8 @@ it contains **no data transformations** (those live only in section 4a and
 > pattern (the `tlsn` / TLSNotary project) is a young protocol, strongest on
 > TLS 1.2-style flows. The guidance was to treat the design as a blueprint and run
 > a feasibility spike against the real Amazon endpoint before committing build
-> effort - which is exactly what the
-> [MPC-TLS compatibility finding](../.agents/tasks/compat-report.md) later did.
+> effort - which is exactly what the MPC-TLS compatibility finding later did (the
+> finding is kept in local notes only, not committed).
 
 ### 6a. Approach A - zkTLS / TLSNotary (a notary witnesses the TLS session)
 
@@ -203,10 +204,13 @@ transcript hash; an **Olea verifier** checks every incoming bundle.
   bundle on an agreed schema, accept the added latency and the live-connection /
   fail-closed requirement, and route **all** relevant Amazon traffic through this
   path (no unnotarized side path).
-- **In this repo:** this is the approach that was actually built - the Rust prover
-  sidecar, the Olea-hosted notary, and the nonce-bound verifier. See
-  [Decision 4 (TLSNotary fail-closed)](../opinions.md#decision-4---keep-tlsnotary-as-a-placeholder-that-fails-closed)
-  and the [TLS/TEE trust flow](./FLOWS.md#flow-4-tlstee-nitro-attestation-trust-flow).
+- **In this repo:** this approach was built first (the Rust prover sidecar, the
+  Olea-hosted notary, and the nonce-bound verifier) and is now **historical
+  reference** — it was superseded by Approach B taken to its conclusion (the enclave
+  terminating TLS itself, TLS-in-TEE). See
+  [Decision 4](../opinions.md#decision-4---tlsnotary-is-now-historical-reference-superseded-by-tls-in-tee),
+  [Decision 11](../opinions.md#decision-11---converted-from-mpc-tlsnotary-to-tls-in-tee-enclave-terminates-tls-itself),
+  and [archive/TLSNOTARY.md](../archive/TLSNOTARY.md).
 
 ### 6b. Approach B - Nitro TEE (a sealed enclave fetches and signs)
 
@@ -245,11 +249,13 @@ pre-approved value.
 ### 6c. Why the repo ended up with both, bound together
 
 The engagement chose the **common TLS + TEE** mechanism (section 2), and the two
-approaches above are complementary rather than either/or: Approach A proves
-**source authenticity** (the bytes really came from Amazon over TLS) and Approach B
-proves **execution authenticity** (approved, unmodified code processed them). The
-repo's current design binds them to the **same response bytes**, so one evidence
-package carries both seals. This is the business/architecture basis for
+approaches above target two properties: Approach A proves **source authenticity**
+(the bytes really came from Amazon over TLS) and Approach B proves **execution
+authenticity** (approved, unmodified code processed them). The repo first built both
+and bound them to the same bytes; it then converted to **TLS-in-TEE**, where
+Approach B's enclave terminates TLS itself and therefore provides *both* properties
+from a single boundary — so the external notary (Approach A) is no longer needed on
+the live path. This is the business/architecture basis for
 [Decision 1 (use a Nitro Enclave with attestation at all)](../opinions.md#decision-1---use-a-nitro-enclave-with-attestation-at-all),
 which spells out why a plain signature gives only attribution, not origin or
 execution identity.

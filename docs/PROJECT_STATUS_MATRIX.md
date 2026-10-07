@@ -13,10 +13,11 @@
 > link here.
 
 > **Freshness:** this page was refreshed after the TLS-in-TEE conversion was
-> proven end-to-end. Code is at `main` HEAD `838a170`, merged across 5 workflow
-> cycles. The previous approach (MPC-TLS / TLSNotary with an external notary)
+> proven end-to-end. Code is on `main` (TLS-in-TEE merged across 5 workflow
+> cycles). The previous approach (MPC-TLS / TLSNotary with an external notary)
 > is superseded — the notary code is kept in the repo as historical reference
-> only. For the full narrative see `SESSION_HANDOFF.md`.
+> only. For the step-by-step narrative see `flow-steps/` and the detailed
+> mechanism in `TLS_IN_TEE_EXPLAINED.md`.
 
 This matrix is the **single source of truth** for status facts. If any other
 document disagrees, this page is correct.
@@ -84,7 +85,7 @@ document disagrees, this page is correct.
 - **Transform:** pure pass-through (transformed = rawPayload, no logic).
 - **Coordinator:** driven by `--source-id` (no `--raw-payload-file`, `--raw-response-b64-file`, `--tls-proof-file`).
 - **Accounts:** preprod `706179786846`, dev `855703743734`. Region `ap-southeast-1`.
-- **Code:** `main` at `838a170`, merged across 5 workflow cycles.
+- **Code:** on `main` (TLS-in-TEE merged across 5 workflow cycles).
 
 ## Code defects found and fixed
 
@@ -115,5 +116,5 @@ is the flow that genuinely requires TLS-in-TEE).
 Describe this project as: **a proven TLS-in-TEE verifiable oracle — the Nitro
 enclave terminates TLS itself, producing attested evidence for 7 source calls
 (3 Amazon SP-API + 4 KYC), all 7 returning 202 ACCEPTED. The MPC-TLS/notary
-approach is historical reference; TLS-in-TEE is the live path.** Code is at
-`main` `838a170`.
+approach is historical reference; TLS-in-TEE is the live path.** Code is on
+`main` (TLS-in-TEE merged).

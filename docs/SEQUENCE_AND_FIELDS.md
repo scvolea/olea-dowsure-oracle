@@ -4,9 +4,9 @@ Authoritative, maintainable source for the end-to-end sequence diagram, the payl
 field reference, and the anti-tamper model. Reflects the **TLS-in-TEE** architecture:
 the enclave opens and terminates TLS to each upstream source itself. The previous
 MPC-TLS/TLSNotary approach (external notary + prover sidecar) is historical reference
-only — see `docs/TLSNOTARY.md`.
+only — see `archive/TLSNOTARY.md`.
 
-For who-hosts-what and the ELI5 narrative see `PRESENTATION.md`; for the flow prose see `FLOWS.md`.
+For who-hosts-what see `flow-steps/diagram-production-topology.md`; for the flow prose see `FLOWS.md`.
 
 ---
 
@@ -42,11 +42,13 @@ sequenceDiagram
 ### The origin anchor — rawHash
 
 In TLS-in-TEE, the enclave terminates TLS itself and receives the plaintext
-response `R` directly. There is no external notary and no separate
-`rawResponseB64` / `revealed_recv_b64` field. The enclave computes
-`rawHash = SHA256(R)` over the response bytes it received, and that hash is
-the origin anchor — it is bound into the attestation `user_data` and verified
-by Olea.
+response `R` directly. There is no external notary and no notary-specific
+`revealed_recv_b64` field. The enclave computes `rawHash = SHA256(R)` over the
+response bytes it received, and that hash is the origin anchor — it is bound into
+the attestation `user_data` and verified by Olea. The wire bytes themselves still
+travel in the submission as `rawResponseB64` (base64 of `R`); the verifier
+re-hashes them (`SHA256(decode(rawResponseB64)) == rawPayloadDigest`) as an
+independent integrity check.
 
 ### Attestation binding (`user_data`)
 
@@ -64,7 +66,9 @@ by Olea.
 `sourceId`.
 
 Fields **removed** from the previous MPC-TLS approach (no longer in the manifest):
-`tlsProofType`, `tlsProofHash`, `tlsProofResponseHash`, `rawResponseB64`, `tlsProof`.
+`tlsProofType`, `tlsProofHash`, `tlsProofResponseHash`, `tlsProof`,
+`revealed_recv_b64`. (`rawResponseB64` is **kept** — it carries the wire bytes the
+verifier re-hashes against `rawPayloadDigest`.)
 
 ### Coordinator invocation
 
